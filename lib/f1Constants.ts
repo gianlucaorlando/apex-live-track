@@ -1,0 +1,2 @@
+export const DEMO_SESSION_KEY = 9165;
+export const DEMO_REPLAY_OFFSET_SECONDS = 91 * 60;
