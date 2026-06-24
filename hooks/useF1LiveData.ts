@@ -197,6 +197,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [messages, setMessages] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [motionTimeMs, setMotionTimeMs] = useState<number | null>(null);
+  const [loadedDemo, setLoadedDemo] = useState<boolean | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const replayStartedAt = useRef(Date.now());
 
@@ -207,10 +208,15 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
 
   useEffect(() => {
     replayStartedAt.current = Date.now();
+    setSession(null);
+    setMeeting(null);
+    setDrivers([]);
+    setStandings([]);
     setTrackPoints([]);
     setRaceControlMessages([]);
     setFinishLine(null);
     setMotionTimeMs(null);
+    setLastUpdated(null);
   }, [demo]);
 
   useEffect(() => {
@@ -251,6 +257,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setSession(sessionResponse.data);
         setMeeting(meetingResponse.data);
         setDrivers(driverResponse.data);
+        setLoadedDemo(demo);
         setTokenConfigured(sessionResponse.meta.tokenConfigured);
         setPartial(
           sessionResponse.meta.partial ||
@@ -283,6 +290,12 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
               );
 
         setError(apiMessage(locale, clientError.message));
+        setSession(null);
+        setMeeting(null);
+        setDrivers([]);
+        setStandings([]);
+        setTrackPoints([]);
+        setLoadedDemo(demo);
         setRateLimited(clientError.rateLimited);
         setTokenConfigured(clientError.meta?.tokenConfigured ?? false);
         setPartial(true);
@@ -303,7 +316,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   }, [demo, locale, refreshNonce]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || loadedDemo !== demo) {
       setFinishLine(null);
       return;
     }
@@ -356,10 +369,10 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       disposed = true;
       controller.abort();
     };
-  }, [demo, locale, session, refreshNonce]);
+  }, [demo, locale, loadedDemo, session, refreshNonce]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || loadedDemo !== demo) {
       setMotionTimeMs(null);
       return;
     }
@@ -390,10 +403,10 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     return () => {
       window.clearInterval(motionInterval);
     };
-  }, [demo, session]);
+  }, [demo, loadedDemo, session]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || loadedDemo !== demo) {
       return;
     }
 
@@ -593,25 +606,28 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         controller.abort();
       }
     };
-  }, [demo, locale, session, refreshNonce, tokenConfigured]);
+  }, [demo, locale, loadedDemo, session, refreshNonce, tokenConfigured]);
+
+  const hasCurrentModeData = loadedDemo === demo;
+  const currentLoading = loading || !hasCurrentModeData;
 
   return {
-    session,
-    meeting,
-    drivers,
-    standings,
-    raceControlMessages,
-    trackPoints,
-    finishLine,
-    loading,
-    error,
-    isLive: session?.isLive ?? false,
-    rateLimited,
-    tokenConfigured,
-    partial,
-    messages,
-    lastUpdated,
-    motionTimeMs,
+    session: hasCurrentModeData ? session : null,
+    meeting: hasCurrentModeData ? meeting : null,
+    drivers: hasCurrentModeData ? drivers : [],
+    standings: hasCurrentModeData ? standings : [],
+    raceControlMessages: hasCurrentModeData ? raceControlMessages : [],
+    trackPoints: hasCurrentModeData ? trackPoints : [],
+    finishLine: hasCurrentModeData ? finishLine : null,
+    loading: currentLoading,
+    error: hasCurrentModeData ? error : null,
+    isLive: hasCurrentModeData ? session?.isLive ?? false : false,
+    rateLimited: hasCurrentModeData ? rateLimited : false,
+    tokenConfigured: hasCurrentModeData ? tokenConfigured : false,
+    partial: hasCurrentModeData ? partial : false,
+    messages: hasCurrentModeData ? messages : [],
+    lastUpdated: hasCurrentModeData ? lastUpdated : null,
+    motionTimeMs: hasCurrentModeData ? motionTimeMs : null,
     refresh,
   };
 }

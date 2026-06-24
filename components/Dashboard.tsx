@@ -81,6 +81,9 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   const [weather, setWeather] = useState<RaceWeather | null>(null);
   const [circuitPhoto, setCircuitPhoto] = useState<CircuitPhoto | null>(null);
   const liveData = useF1LiveData(demo, locale);
+  const loadingMessage = demo
+    ? t(locale, "loadingDemoReplay")
+    : t(locale, "loadingLatestSession");
 
   useEffect(() => {
     setLocale(normalizeLocale(window.localStorage.getItem("f1-live-track-locale")));
@@ -196,7 +199,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           onLocaleChange={setLocale}
         />
         <div className="p-4 sm:p-6 lg:p-8">
-          <LoadingState locale={locale} />
+          <LoadingState locale={locale} message={loadingMessage} />
         </div>
       </main>
     );
