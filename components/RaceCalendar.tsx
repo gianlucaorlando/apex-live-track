@@ -7,6 +7,7 @@ import {
   Clock,
   ExternalLink,
   Flag,
+  Gauge,
   Loader2,
   MapPin,
   RefreshCcw,
@@ -381,6 +382,15 @@ function RaceCard({ race, locale }: { race: F1CalendarRace; locale: Locale }) {
           <MapPin className="h-3.5 w-3.5 flex-none text-emerald-300" aria-hidden="true" />
           <span className="truncate">{place || circuitName(locale, race.circuitName)}</span>
         </div>
+        {race.laps !== null ? (
+          <div
+            className="mt-1 flex min-w-0 items-center gap-2 text-xs font-semibold text-neutral-400"
+            data-race-laps
+          >
+            <Gauge className="h-3.5 w-3.5 flex-none text-cyan-300" aria-hidden="true" />
+            <span className="truncate">{t(locale, "raceLaps", { laps: race.laps })}</span>
+          </div>
+        ) : null}
       </div>
 
       <WeekendSessions sessions={race.sessions} locale={locale} />

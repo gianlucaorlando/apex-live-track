@@ -27,6 +27,7 @@ interface FallbackRaceSeed {
   country: string;
   weekendStart: string;
   raceDate: string;
+  laps: number;
   sprint?: boolean;
   podium?: RacePodiumDriver[];
 }
@@ -125,6 +126,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Australia",
     weekendStart: "2026-03-06",
     raceDate: "2026-03-08",
+    laps: 58,
     podium: [
       podiumDriver(1, "RUS", "George", "Russell", "Mercedes", "1:23:06.801"),
       podiumDriver(2, "ANT", "Kimi", "Antonelli", "Mercedes", "+2.974"),
@@ -139,6 +141,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "China",
     weekendStart: "2026-03-13",
     raceDate: "2026-03-15",
+    laps: 56,
     sprint: true,
     podium: [
       podiumDriver(1, "ANT", "Kimi", "Antonelli", "Mercedes", "1:33:15.607"),
@@ -154,6 +157,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Japan",
     weekendStart: "2026-03-27",
     raceDate: "2026-03-29",
+    laps: 53,
     podium: [
       podiumDriver(1, "ANT", "Kimi", "Antonelli", "Mercedes", "1:28:03.403"),
       podiumDriver(2, "PIA", "Oscar", "Piastri", "McLaren", "+13.722"),
@@ -168,6 +172,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "United States",
     weekendStart: "2026-05-01",
     raceDate: "2026-05-03",
+    laps: 57,
     sprint: true,
     podium: [
       podiumDriver(1, "ANT", "Kimi", "Antonelli", "Mercedes", "1:33:19.273"),
@@ -183,6 +188,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Canada",
     weekendStart: "2026-05-22",
     raceDate: "2026-05-24",
+    laps: 70,
     sprint: true,
     podium: [
       podiumDriver(1, "ANT", "Kimi", "Antonelli", "Mercedes", "1:28:15.758"),
@@ -198,6 +204,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Monaco",
     weekendStart: "2026-06-05",
     raceDate: "2026-06-07",
+    laps: 78,
     podium: [
       podiumDriver(1, "ANT", "Kimi", "Antonelli", "Mercedes", "2:23:31.243"),
       podiumDriver(2, "HAM", "Lewis", "Hamilton", "Ferrari", "+6.271"),
@@ -212,6 +219,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Spain",
     weekendStart: "2026-06-12",
     raceDate: "2026-06-14",
+    laps: 66,
     podium: [
       podiumDriver(1, "HAM", "Lewis", "Hamilton", "Ferrari", "1:32:28.105"),
       podiumDriver(2, "RUS", "George", "Russell", "Mercedes", "+19.561"),
@@ -226,6 +234,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Austria",
     weekendStart: "2026-06-26",
     raceDate: "2026-06-28",
+    laps: 71,
   },
   {
     round: 9,
@@ -235,6 +244,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Great Britain",
     weekendStart: "2026-07-03",
     raceDate: "2026-07-05",
+    laps: 52,
     sprint: true,
   },
   {
@@ -245,6 +255,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Belgium",
     weekendStart: "2026-07-17",
     raceDate: "2026-07-19",
+    laps: 44,
   },
   {
     round: 11,
@@ -254,6 +265,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Hungary",
     weekendStart: "2026-07-24",
     raceDate: "2026-07-26",
+    laps: 70,
   },
   {
     round: 12,
@@ -263,6 +275,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Netherlands",
     weekendStart: "2026-08-21",
     raceDate: "2026-08-23",
+    laps: 72,
     sprint: true,
   },
   {
@@ -273,6 +286,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Italy",
     weekendStart: "2026-09-04",
     raceDate: "2026-09-06",
+    laps: 53,
   },
   {
     round: 14,
@@ -282,6 +296,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Spain",
     weekendStart: "2026-09-11",
     raceDate: "2026-09-13",
+    laps: 57,
   },
   {
     round: 15,
@@ -291,6 +306,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Azerbaijan",
     weekendStart: "2026-09-24",
     raceDate: "2026-09-26",
+    laps: 51,
   },
   {
     round: 16,
@@ -300,6 +316,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Singapore",
     weekendStart: "2026-10-09",
     raceDate: "2026-10-11",
+    laps: 62,
     sprint: true,
   },
   {
@@ -310,6 +327,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "United States",
     weekendStart: "2026-10-23",
     raceDate: "2026-10-25",
+    laps: 56,
   },
   {
     round: 18,
@@ -319,6 +337,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Mexico",
     weekendStart: "2026-10-30",
     raceDate: "2026-11-01",
+    laps: 71,
   },
   {
     round: 19,
@@ -328,6 +347,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Brazil",
     weekendStart: "2026-11-06",
     raceDate: "2026-11-08",
+    laps: 71,
   },
   {
     round: 20,
@@ -337,6 +357,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "United States",
     weekendStart: "2026-11-19",
     raceDate: "2026-11-21",
+    laps: 50,
   },
   {
     round: 21,
@@ -346,6 +367,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "Qatar",
     weekendStart: "2026-11-27",
     raceDate: "2026-11-29",
+    laps: 57,
   },
   {
     round: 22,
@@ -355,6 +377,7 @@ const FALLBACK_RACES: FallbackRaceSeed[] = [
     country: "United Arab Emirates",
     weekendStart: "2026-12-04",
     raceDate: "2026-12-06",
+    laps: 58,
   },
 ];
 
@@ -857,6 +880,7 @@ export function createFallbackCalendarPayload(locale: Locale): F1CalendarApiResp
       date: race.raceDate,
       time: null,
       startsAt,
+      laps: race.laps,
       status: raceStatus(startsAt),
       wikipediaUrl: null,
       circuitWikipediaUrl: null,

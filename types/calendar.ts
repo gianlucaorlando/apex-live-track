@@ -39,6 +39,7 @@ export interface F1CalendarRace {
   date: string;
   time: string | null;
   startsAt: string;
+  laps: number | null;
   status: RaceStatus;
   wikipediaUrl: string | null;
   circuitWikipediaUrl: string | null;

@@ -29,13 +29,18 @@ type JsonRecord = Record<string, unknown>;
 
 type PodiumEntry = RacePodiumDriver & { round: number };
 
+interface ResultsByRound {
+  lapsByRound: Map<number, number>;
+  podiumByRound: Map<number, RacePodiumDriver[]>;
+}
+
 interface CacheEntry {
   expiresAt: number;
   value: F1CalendarApiResponse;
 }
 
 const JOLPICA_BASE_URL = "https://api.jolpi.ca/ergast/f1";
-const CALENDAR_CACHE_VERSION = "v3";
+const CALENDAR_CACHE_VERSION = "v4";
 
 const globalCache = globalThis as typeof globalThis & {
   __f1LiveTrackCalendarCacheV3?: Map<string, CacheEntry>;
@@ -254,6 +259,23 @@ function parsePodiums(payload: unknown): PodiumEntry[] {
     }));
 }
 
+function parseLapsByRound(payload: unknown): Map<number, number> {
+  const lapsByRound = new Map<number, number>();
+
+  for (const rawRace of arrayValue(raceTable(payload).Races)) {
+    const race = asRecord(rawRace);
+    const result = asRecord(arrayValue(race.Results)[0]);
+    const round = numberValue(race, "round");
+    const laps = numberValue(result, "laps");
+
+    if (round !== null && laps !== null) {
+      lapsByRound.set(round, laps);
+    }
+  }
+
+  return lapsByRound;
+}
+
 function parsePodiumPosition(payload: unknown): PodiumEntry[] {
   const races = arrayValue(raceTable(payload).Races);
 
@@ -301,14 +323,20 @@ function parsePodiumPosition(payload: unknown): PodiumEntry[] {
 async function fetchPodiumByRound(
   season: number,
   messages: string[],
-): Promise<Map<number, RacePodiumDriver[]>> {
+): Promise<ResultsByRound> {
   const podiumByRound = new Map<number, RacePodiumDriver[]>();
+  const lapsByRound = new Map<number, number>();
 
   try {
     const url = endpoint(`${season}/results/`);
     url.searchParams.set("limit", "2000");
+    const payload = await fetchJson(url);
 
-    for (const driver of parsePodiums(await fetchJson(url))) {
+    for (const [round, laps] of parseLapsByRound(payload)) {
+      lapsByRound.set(round, laps);
+    }
+
+    for (const driver of parsePodiums(payload)) {
       const existing = podiumByRound.get(driver.round) ?? [];
       const { round, ...podiumDriver } = driver;
       podiumByRound.set(round, [...existing, podiumDriver]);
@@ -318,7 +346,7 @@ async function fetchPodiumByRound(
       error instanceof Error ? error.message : "Ricerca podio non riuscita";
 
     if (/429/.test(reason)) {
-      return podiumByRound;
+      return { lapsByRound, podiumByRound };
     }
 
     try {
@@ -326,7 +354,13 @@ async function fetchPodiumByRound(
         const url = endpoint(`${season}/results/${position}/`);
         url.searchParams.set("limit", "100");
 
-        for (const driver of parsePodiumPosition(await fetchJson(url))) {
+        const payload = await fetchJson(url);
+
+        for (const [round, laps] of parseLapsByRound(payload)) {
+          lapsByRound.set(round, laps);
+        }
+
+        for (const driver of parsePodiumPosition(payload)) {
           const existing = podiumByRound.get(driver.round) ?? [];
           const { round, ...podiumDriver } = driver;
           podiumByRound.set(round, [...existing, podiumDriver]);
@@ -344,7 +378,7 @@ async function fetchPodiumByRound(
     );
   }
 
-  return podiumByRound;
+  return { lapsByRound, podiumByRound };
 }
 
 async function fetchCalendarPayload(
@@ -362,7 +396,7 @@ async function fetchCalendarPayload(
     numberValue(table, "season") ??
     numberValue(asRecord(rawRaces[0]), "season") ??
     new Date().getUTCFullYear();
-  const podiumByRound = await fetchPodiumByRound(season, messages);
+  const { lapsByRound, podiumByRound } = await fetchPodiumByRound(season, messages);
   const generatedAt = new Date().toISOString();
   const races: F1CalendarRace[] = rawRaces
     .map((rawRace) => {
@@ -390,6 +424,7 @@ async function fetchCalendarPayload(
         date,
         time,
         startsAt,
+        laps: lapsByRound.get(round) ?? null,
         status,
         wikipediaUrl: stringValue(race, "url"),
         circuitWikipediaUrl: stringValue(circuit, "url"),
