@@ -47,6 +47,7 @@ export interface UseF1LiveDataResult {
   standings: LiveStandingRow[];
   raceControlMessages: RaceControlMessage[];
   trackPoints: TrackPoint[];
+  currentTrackPoints: TrackPoint[];
   finishLine: FinishLinePoint | null;
   loading: boolean;
   error: string | null;
@@ -188,6 +189,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [standings, setStandings] = useState<LiveStandingRow[]>([]);
   const [raceControlMessages, setRaceControlMessages] = useState<RaceControlMessage[]>([]);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
+  const [currentTrackPoints, setCurrentTrackPoints] = useState<TrackPoint[]>([]);
   const [finishLine, setFinishLine] = useState<FinishLinePoint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -213,6 +215,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     setDrivers([]);
     setStandings([]);
     setTrackPoints([]);
+    setCurrentTrackPoints([]);
     setRaceControlMessages([]);
     setFinishLine(null);
     setMotionTimeMs(null);
@@ -295,6 +298,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setDrivers([]);
         setStandings([]);
         setTrackPoints([]);
+        setCurrentTrackPoints([]);
         setLoadedDemo(demo);
         setRateLimited(clientError.rateLimited);
         setTokenConfigured(clientError.meta?.tokenConfigured ?? false);
@@ -444,6 +448,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
           return;
         }
 
+        setCurrentTrackPoints(response.data.map(locationToTrackPoint));
         setTrackPoints((current) => mergeTrackPoints(current, response.data));
         setError(null);
         setRateLimited(false);
@@ -487,6 +492,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setStandings(response.data.rows);
         setError(null);
         setRateLimited(false);
+        setCurrentTrackPoints(response.data.trackPoints);
         setTrackPoints((current) =>
           mergeTrackPoints(
             current,
@@ -618,6 +624,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     standings: hasCurrentModeData ? standings : [],
     raceControlMessages: hasCurrentModeData ? raceControlMessages : [],
     trackPoints: hasCurrentModeData ? trackPoints : [],
+    currentTrackPoints: hasCurrentModeData ? currentTrackPoints : [],
     finishLine: hasCurrentModeData ? finishLine : null,
     loading: currentLoading,
     error: hasCurrentModeData ? error : null,

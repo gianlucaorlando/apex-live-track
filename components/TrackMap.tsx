@@ -46,6 +46,7 @@ interface TrackMapProps {
   meeting: F1Meeting | null;
   standings: LiveStandingRow[];
   trackPoints: TrackPoint[];
+  currentTrackPoints: TrackPoint[];
   finishLine: FinishLinePoint | null;
   weather: RaceWeather | null;
   motionTimeMs: number | null;
@@ -628,6 +629,7 @@ export function TrackMap({
   meeting,
   standings,
   trackPoints,
+  currentTrackPoints,
   finishLine,
   weather,
   motionTimeMs,
@@ -640,14 +642,21 @@ export function TrackMap({
   const [driverProfile, setDriverProfile] = useState<DriverProfile | null>(null);
   const [driverProfileLoading, setDriverProfileLoading] = useState(false);
   const [driverProfileError, setDriverProfileError] = useState<string | null>(null);
+  const standingTrackPoints = useMemo(
+    () =>
+      standings
+        .map((row) => row.latestLocation)
+        .filter((point): point is NonNullable<typeof point> => point !== null)
+        .map(locationToTrackPoint),
+    [standings],
+  );
   const baseData = useMemo(() => {
-    const latestPoints = standings
-      .map((row) => row.latestLocation)
-      .filter((point): point is NonNullable<typeof point> => point !== null)
-      .map(locationToTrackPoint);
-    const mapPoints = [...trackPoints, ...latestPoints];
+    const liveWindowPoints = [...currentTrackPoints, ...standingTrackPoints];
+    const mapPoints = [...trackPoints, ...liveWindowPoints];
     const allPoints = finishLine ? [...mapPoints, finishLine] : mapPoints;
-    const polylineRaw = buildTrackPolyline(trackPoints.length > 0 ? trackPoints : latestPoints);
+    const polylineRaw = buildTrackPolyline(
+      trackPoints.length > 0 ? trackPoints : liveWindowPoints,
+    );
     const normalizer = createTrackNormalizer(
       [...allPoints, ...polylineRaw],
       SVG_WIDTH,
@@ -674,9 +683,11 @@ export function TrackMap({
       hasPoints: mapPoints.length > 0,
       normalizer,
     };
-  }, [finishLine, standings, trackPoints]);
+  }, [currentTrackPoints, finishLine, standingTrackPoints, trackPoints]);
 
   const drivers = useMemo(() => {
+    const currentPointByDriver = getLatestTrackPointByDriver(currentTrackPoints);
+    const standingPointByDriver = getLatestTrackPointByDriver(standingTrackPoints);
     const livePointByDriver =
       motionTimeMs && trackPoints.length > 0
         ? getInterpolatedTrackPointByDriver(trackPoints, motionTimeMs)
@@ -685,8 +696,10 @@ export function TrackMap({
     return standings
       .map((row) => {
         const markerPoint =
+          currentPointByDriver.get(row.driverNumber) ??
+          standingPointByDriver.get(row.driverNumber) ??
           livePointByDriver.get(row.driverNumber) ??
-          (row.latestLocation ? locationToTrackPoint(row.latestLocation) : null);
+          null;
 
         if (!markerPoint) {
           return null;
@@ -716,7 +729,14 @@ export function TrackMap({
         } satisfies NormalizedDriverPosition;
       })
       .filter((driver): driver is NormalizedDriverPosition => driver !== null);
-  }, [baseData.normalizer, motionTimeMs, standings, trackPoints]);
+  }, [
+    baseData.normalizer,
+    currentTrackPoints,
+    motionTimeMs,
+    standingTrackPoints,
+    standings,
+    trackPoints,
+  ]);
 
   const polylinePoints = baseData.polyline
     .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
@@ -966,6 +986,8 @@ export function TrackMap({
             selectedDriverNumber === driver.driverNumber;
           const radius = active ? 23 : 19;
           const imageRadius = active ? 21 : 17;
+          const positionLabel = driver.position ? `P${driver.position}` : null;
+          const positionBadgeWidth = positionLabel && positionLabel.length > 2 ? 30 : 24;
 
           return (
             <g
@@ -1027,6 +1049,29 @@ export function TrackMap({
               >
                 {driver.acronym}
               </text>
+              {positionLabel ? (
+                <g transform={`translate(${active ? 17 : 15} ${active ? 18 : 16})`}>
+                  <rect
+                    x={-positionBadgeWidth / 2}
+                    y="-9"
+                    width={positionBadgeWidth}
+                    height="18"
+                    rx="5"
+                    fill="#020617"
+                    stroke="#ffffff"
+                    strokeWidth="1.6"
+                  />
+                  <text
+                    x="0"
+                    y="4"
+                    textAnchor="middle"
+                    className="select-none text-[11px] font-black"
+                    fill="#ffffff"
+                  >
+                    {positionLabel}
+                  </text>
+                </g>
+              ) : null}
             </g>
           );
         })}

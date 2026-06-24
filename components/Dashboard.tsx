@@ -262,6 +262,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                 meeting={liveData.meeting}
                 standings={liveData.standings}
                 trackPoints={liveData.trackPoints}
+                currentTrackPoints={liveData.currentTrackPoints}
                 finishLine={liveData.finishLine}
                 weather={weather}
                 motionTimeMs={liveData.motionTimeMs}
