@@ -759,6 +759,27 @@ export function TrackMap({
     standings,
     trackPoints,
   ]);
+  const renderedDrivers = useMemo(
+    () =>
+      [...drivers].sort((first, second) => {
+        const firstActive =
+          hoveredDriver === first.driverNumber ||
+          selectedDriverNumber === first.driverNumber;
+        const secondActive =
+          hoveredDriver === second.driverNumber ||
+          selectedDriverNumber === second.driverNumber;
+
+        if (firstActive !== secondActive) {
+          return firstActive ? 1 : -1;
+        }
+
+        const firstPosition = first.position ?? Number.MAX_SAFE_INTEGER;
+        const secondPosition = second.position ?? Number.MAX_SAFE_INTEGER;
+
+        return secondPosition - firstPosition;
+      }),
+    [drivers, hoveredDriver, selectedDriverNumber],
+  );
 
   const polylinePoints = baseData.polyline
     .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
@@ -1004,7 +1025,7 @@ export function TrackMap({
           </g>
         ) : null}
 
-        {drivers.map((driver) => {
+        {renderedDrivers.map((driver) => {
           const active =
             hoveredDriver === driver.driverNumber ||
             selectedDriverNumber === driver.driverNumber;

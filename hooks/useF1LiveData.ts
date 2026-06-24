@@ -26,6 +26,9 @@ interface ApiErrorPayload {
   meta?: F1ApiMeta;
 }
 
+const LIVE_MOTION_LAG_MS = 6000;
+const REPLAY_MOTION_LAG_MS = 7000;
+
 class ClientApiError extends Error {
   status: number;
   rateLimited: boolean;
@@ -107,6 +110,10 @@ function buildParams(
   if (session) {
     params.set("session_key", String(session.sessionKey));
     params.set("window_seconds", String(windowSeconds));
+    params.set(
+      "position_lag_ms",
+      String(session.isLive ? LIVE_MOTION_LAG_MS : REPLAY_MOTION_LAG_MS),
+    );
 
     if (!session.isLive) {
       params.set("replay_seconds", String(replaySecondsFor(session, demo, replayStartedAt)));
@@ -382,7 +389,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     }
 
     const activeSession = session;
-    const motionLagMs = activeSession.isLive ? 6000 : 7000;
+    const motionLagMs = activeSession.isLive ? LIVE_MOTION_LAG_MS : REPLAY_MOTION_LAG_MS;
 
     function updateMotionTime() {
       if (activeSession.isLive) {

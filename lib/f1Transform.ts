@@ -404,6 +404,7 @@ export function buildStandings({
   const latestLocation = getLatestLocationByDriver(locations);
   const latestLap = latestLapByDriver(laps);
   const totalLaps = totalLapsFromResults(sessionResults);
+  const useSessionResultFallback = positions.length === 0;
   const tyres = tyreInfoByDriver(tyreStints, laps);
   const resultByDriver = new Map(
     sessionResults.map((result) => [result.driverNumber, result]),
@@ -415,9 +416,15 @@ export function buildStandings({
       const interval = latestInterval.get(driver.driverNumber);
       const result = resultByDriver.get(driver.driverNumber);
       const currentLap =
-        latestLap.get(driver.driverNumber)?.lapNumber ?? result?.numberOfLaps ?? null;
-      const currentPosition = position?.position ?? result?.position ?? null;
-      const rawGap = interval?.gapToLeader ?? result?.gapToLeader ?? null;
+        latestLap.get(driver.driverNumber)?.lapNumber ??
+        (useSessionResultFallback ? result?.numberOfLaps : null) ??
+        null;
+      const currentPosition =
+        position?.position ?? (useSessionResultFallback ? result?.position : null) ?? null;
+      const rawGap =
+        interval?.gapToLeader ??
+        (useSessionResultFallback ? result?.gapToLeader : null) ??
+        null;
       const rawInterval = interval?.interval ?? null;
       const lapped =
         typeof rawGap === "string" &&
@@ -433,7 +440,12 @@ export function buildStandings({
         position: currentPosition,
         gap: formatGap(rawGap, currentPosition, locale),
         interval: formatInterval(rawInterval, currentPosition, locale),
-        status: result?.dnf || result?.dns || result?.dsq ? "OUT" : lapped ? "LAPPED" : null,
+        status:
+          useSessionResultFallback && (result?.dnf || result?.dns || result?.dsq)
+            ? "OUT"
+            : lapped
+              ? "LAPPED"
+              : null,
         tyre: tyres.get(driver.driverNumber) ?? null,
         currentLap,
         totalLaps,

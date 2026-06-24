@@ -6,6 +6,7 @@ import {
   fetchLapsForRequest,
   fetchLocationsForRequest,
   fetchOpenF1Array,
+  fetchPositionsForRequest,
   fetchPositionsForSession,
   fetchSessionResults,
   fetchTyreStintsForSession,
@@ -43,7 +44,9 @@ export async function GET(request: Request) {
           { session_key: context.session.sessionKey },
           { cacheMs: 10 * 60 * 1000 },
         ),
-        fetchPositionsForSession(context.session.sessionKey, context.session.isLive),
+        fetchPositionsForRequest(request, context.session).catch(() =>
+          fetchPositionsForSession(context.session.sessionKey, context.session.isLive),
+        ),
         fetchIntervalsForRequest(request, context.session, 45),
         fetchLocationsForRequest(request, context.session, 45),
         tyreDataPromise,

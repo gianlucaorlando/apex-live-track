@@ -371,6 +371,22 @@ export async function fetchPositionsForSession(
   return raw.map(normalizePosition);
 }
 
+export async function fetchPositionsForRequest(
+  request: Request,
+  session: F1Session,
+): Promise<F1Position[]> {
+  const raw = await fetchOpenF1Array<unknown>(
+    "position",
+    {
+      session_key: session.sessionKey,
+      "date<": positionCutoffIso(request, session),
+    },
+    { cacheMs: session.isLive ? 4500 : 12000 },
+  );
+
+  return raw.map(normalizePosition);
+}
+
 export async function fetchIntervalsForRequest(
   request: Request,
   session: F1Session,
@@ -380,7 +396,7 @@ export async function fetchIntervalsForRequest(
     "intervals",
     {
       session_key: session.sessionKey,
-      ...getTimeWindowParams(request, session, windowSeconds),
+      ...getPositionWindowParams(request, session, windowSeconds),
     },
     { cacheMs: session.isLive ? 3500 : 4500 },
   );
@@ -407,7 +423,7 @@ export async function fetchLapsForRequest(
   request: Request,
   session: F1Session,
 ): Promise<F1Lap[]> {
-  const cutoff = replayCutoffIso(request, session);
+  const cutoff = positionCutoffIso(request, session);
   const raw = await fetchOpenF1Array<unknown>(
     "laps",
     {
@@ -442,6 +458,46 @@ function replayCutoffIso(request: Request, session: F1Session): string {
   const cutoff = windowParams["date<"];
 
   return typeof cutoff === "string" ? cutoff : new Date().toISOString();
+}
+
+function positionCutoffIso(request: Request, session: F1Session): string {
+  const url = new URL(request.url);
+  const cutoffTime = new Date(replayCutoffIso(request, session)).getTime();
+  const requestedLagMs = parseNumberParam(url.searchParams.get("position_lag_ms"), 0);
+  const lagMs = clamp(requestedLagMs, 0, 15000);
+
+  if (!Number.isFinite(cutoffTime) || lagMs <= 0) {
+    return replayCutoffIso(request, session);
+  }
+
+  return new Date(cutoffTime - lagMs).toISOString();
+}
+
+function getPositionWindowParams(
+  request: Request,
+  session: F1Session,
+  defaultWindowSeconds: number,
+): OpenF1Params {
+  const baseWindow = getTimeWindowParams(request, session, defaultWindowSeconds);
+  const baseStart = new Date(String(baseWindow["date>"])).getTime();
+  const baseFinish = new Date(String(baseWindow["date<"])).getTime();
+  const cutoff = new Date(positionCutoffIso(request, session)).getTime();
+
+  if (
+    !Number.isFinite(baseStart) ||
+    !Number.isFinite(baseFinish) ||
+    !Number.isFinite(cutoff) ||
+    cutoff >= baseFinish
+  ) {
+    return baseWindow;
+  }
+
+  const windowMs = Math.max(baseFinish - baseStart, 5000);
+
+  return {
+    "date>": new Date(cutoff - windowMs).toISOString(),
+    "date<": new Date(cutoff).toISOString(),
+  };
 }
 
 function messageTime(value: string): number {
