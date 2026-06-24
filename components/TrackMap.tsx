@@ -686,8 +686,14 @@ export function TrackMap({
   }, [currentTrackPoints, finishLine, standingTrackPoints, trackPoints]);
 
   const drivers = useMemo(() => {
-    const currentPointByDriver = getLatestTrackPointByDriver(currentTrackPoints);
-    const standingPointByDriver = getLatestTrackPointByDriver(standingTrackPoints);
+    const currentPointByDriver =
+      motionTimeMs && currentTrackPoints.length > 0
+        ? getInterpolatedTrackPointByDriver(currentTrackPoints, motionTimeMs)
+        : getLatestTrackPointByDriver(currentTrackPoints);
+    const standingPointByDriver =
+      motionTimeMs && standingTrackPoints.length > 0
+        ? getInterpolatedTrackPointByDriver(standingTrackPoints, motionTimeMs)
+        : getLatestTrackPointByDriver(standingTrackPoints);
     const livePointByDriver =
       motionTimeMs && trackPoints.length > 0
         ? getInterpolatedTrackPointByDriver(trackPoints, motionTimeMs)
@@ -1002,7 +1008,7 @@ export function TrackMap({
               }}
               style={{
                 transform: `translate(${driver.x}px, ${driver.y}px)`,
-                transition: "transform 260ms linear, opacity 160ms ease",
+                transition: "transform 180ms linear, opacity 160ms ease",
                 transformBox: "fill-box",
                 transformOrigin: "center",
                 willChange: "transform",

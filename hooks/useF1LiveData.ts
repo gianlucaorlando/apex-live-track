@@ -382,7 +382,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     }
 
     const activeSession = session;
-    const motionLagMs = activeSession.isLive ? 3500 : 6000;
+    const motionLagMs = activeSession.isLive ? 6000 : 7000;
 
     function updateMotionTime() {
       if (activeSession.isLive) {
@@ -402,7 +402,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     }
 
     updateMotionTime();
-    const motionInterval = window.setInterval(updateMotionTime, 250);
+    const motionInterval = window.setInterval(updateMotionTime, 120);
 
     return () => {
       window.clearInterval(motionInterval);
@@ -448,7 +448,9 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
           return;
         }
 
-        setCurrentTrackPoints(response.data.map(locationToTrackPoint));
+        if (response.data.length > 0) {
+          setCurrentTrackPoints(response.data.map(locationToTrackPoint));
+        }
         setTrackPoints((current) => mergeTrackPoints(current, response.data));
         setError(null);
         setRateLimited(false);
@@ -492,7 +494,9 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setStandings(response.data.rows);
         setError(null);
         setRateLimited(false);
-        setCurrentTrackPoints(response.data.trackPoints);
+        if (response.data.trackPoints.length > 0) {
+          setCurrentTrackPoints(response.data.trackPoints);
+        }
         setTrackPoints((current) =>
           mergeTrackPoints(
             current,
