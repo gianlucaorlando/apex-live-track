@@ -33,19 +33,22 @@ export async function GET(request: Request) {
         tyreError: error instanceof Error ? error.message : "Dati gomme non disponibili.",
         tyreStints: [],
       }));
-    const [rawDrivers, positions, intervals, locations, tyreData] = await Promise.all([
-      fetchOpenF1Array<unknown>(
-        "drivers",
-        { session_key: context.session.sessionKey },
-        { cacheMs: 10 * 60 * 1000 },
-      ),
-      fetchPositionsForSession(context.session.sessionKey, context.session.isLive),
-      fetchIntervalsForRequest(request, context.session, 45),
-      fetchLocationsForRequest(request, context.session, 45),
-      tyreDataPromise,
-    ]);
-    const sessionResults =
-      positions.length === 0 ? await fetchSessionResults(context.session.sessionKey) : [];
+    const sessionResultsPromise = fetchSessionResults(context.session.sessionKey).catch(
+      () => [],
+    );
+    const [rawDrivers, positions, intervals, locations, tyreData, sessionResults] =
+      await Promise.all([
+        fetchOpenF1Array<unknown>(
+          "drivers",
+          { session_key: context.session.sessionKey },
+          { cacheMs: 10 * 60 * 1000 },
+        ),
+        fetchPositionsForSession(context.session.sessionKey, context.session.isLive),
+        fetchIntervalsForRequest(request, context.session, 45),
+        fetchLocationsForRequest(request, context.session, 45),
+        tyreDataPromise,
+        sessionResultsPromise,
+      ]);
     const drivers = rawDrivers.map(normalizeDriver);
     const rows = buildStandings({
       drivers,

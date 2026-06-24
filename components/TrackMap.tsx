@@ -291,6 +291,10 @@ function DriverProfileCard({
   onClose: () => void;
 }) {
   const tyreColor = tyreCompoundColor(driver.tyre?.compound);
+  const lapValue = t(locale, "lapProgressValue", {
+    current: driver.currentLap ? String(driver.currentLap) : "-",
+    total: driver.totalLaps ? String(driver.totalLaps) : "-",
+  });
 
   return (
     <aside
@@ -340,6 +344,9 @@ function DriverProfileCard({
             <div className="text-white/45">{t(locale, "position")}</div>
             <div className="mt-1 text-lg font-black text-white">
               {driver.position ? `P${driver.position}` : "P-"}
+            </div>
+            <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-cyan-100/70">
+              {t(locale, "lapProgress")} {lapValue}
             </div>
           </div>
           <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
@@ -450,6 +457,13 @@ function DriverProfileCard({
 
 function markerTitle(driver: NormalizedDriverPosition, locale: Locale): string {
   const position = driver.position ? `P${driver.position}` : "P-";
+  const laps =
+    driver.currentLap || driver.totalLaps
+      ? ` | ${t(locale, "lapProgress")} ${t(locale, "lapProgressValue", {
+          current: driver.currentLap ? String(driver.currentLap) : "-",
+          total: driver.totalLaps ? String(driver.totalLaps) : "-",
+        })}`
+      : "";
   const status = driver.status
     ? ` | ${t(locale, "markerStatus")} ${driverStatus(locale, driver.status)}`
     : "";
@@ -461,7 +475,7 @@ function markerTitle(driver: NormalizedDriverPosition, locale: Locale): string {
   return `${driver.acronym} - ${driver.fullName} | ${position} | ${driver.teamName} | ${t(
     locale,
     "markerGap",
-  )} ${driver.gap} | ${t(locale, "markerInterval")} ${driver.interval}${tyre}${status}`;
+  )} ${driver.gap} | ${t(locale, "markerInterval")} ${driver.interval}${laps}${tyre}${status}`;
 }
 
 function finishLineTitle(finishLine: FinishLinePoint, locale: Locale): string {
@@ -728,6 +742,8 @@ export function TrackMap({
           interval: row.interval,
           status: row.status,
           tyre: row.tyre,
+          currentLap: row.currentLap,
+          totalLaps: row.totalLaps,
           x: normalized.x,
           y: normalized.y,
           rawX: normalized.rawX,
@@ -766,6 +782,8 @@ export function TrackMap({
           interval: selectedStandingRow.interval,
           status: selectedStandingRow.status,
           tyre: selectedStandingRow.tyre,
+          currentLap: selectedStandingRow.currentLap,
+          totalLaps: selectedStandingRow.totalLaps,
           x: 0,
           y: 0,
           rawX: 0,

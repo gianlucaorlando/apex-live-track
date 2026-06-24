@@ -372,6 +372,14 @@ function tyreInfoByDriver(
   return result;
 }
 
+function totalLapsFromResults(results: F1SessionResult[]): number | null {
+  const laps = results
+    .map((result) => result.numberOfLaps)
+    .filter((value): value is number => typeof value === "number" && value > 0);
+
+  return laps.length > 0 ? Math.max(...laps) : null;
+}
+
 export function buildStandings({
   drivers,
   positions,
@@ -394,6 +402,8 @@ export function buildStandings({
   const latestPosition = latestByDriver(positions);
   const latestInterval = latestByDriver(intervals);
   const latestLocation = getLatestLocationByDriver(locations);
+  const latestLap = latestLapByDriver(laps);
+  const totalLaps = totalLapsFromResults(sessionResults);
   const tyres = tyreInfoByDriver(tyreStints, laps);
   const resultByDriver = new Map(
     sessionResults.map((result) => [result.driverNumber, result]),
@@ -404,6 +414,8 @@ export function buildStandings({
       const position = latestPosition.get(driver.driverNumber);
       const interval = latestInterval.get(driver.driverNumber);
       const result = resultByDriver.get(driver.driverNumber);
+      const currentLap =
+        latestLap.get(driver.driverNumber)?.lapNumber ?? result?.numberOfLaps ?? null;
       const currentPosition = position?.position ?? result?.position ?? null;
       const rawGap = interval?.gapToLeader ?? result?.gapToLeader ?? null;
       const rawInterval = interval?.interval ?? null;
@@ -423,6 +435,8 @@ export function buildStandings({
         interval: formatInterval(rawInterval, currentPosition, locale),
         status: result?.dnf || result?.dns || result?.dsq ? "OUT" : lapped ? "LAPPED" : null,
         tyre: tyres.get(driver.driverNumber) ?? null,
+        currentLap,
+        totalLaps,
         latestLocation: latestLocation.get(driver.driverNumber) ?? null,
         updatedAt: interval?.date ?? position?.date ?? null,
       } satisfies LiveStandingRow;

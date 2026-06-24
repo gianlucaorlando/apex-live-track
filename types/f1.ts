@@ -152,6 +152,8 @@ export interface LiveStandingRow {
   interval: string;
   status: DriverStatus | null;
   tyre: DriverTyreInfo | null;
+  currentLap: number | null;
+  totalLaps: number | null;
   latestLocation: F1LocationPoint | null;
   updatedAt: string | null;
 }
@@ -191,6 +193,8 @@ export interface NormalizedDriverPosition {
   rawY: number;
   status: DriverStatus | null;
   tyre: DriverTyreInfo | null;
+  currentLap: number | null;
+  totalLaps: number | null;
 }
 
 export interface NormalizedTrackPoint {

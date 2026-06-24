@@ -47,6 +47,10 @@ export function LiveStandings({
               const selected = selectedDriverNumber === row.driverNumber;
               const active = hoveredDriver === row.driverNumber || selected;
               const tyreColor = tyreCompoundColor(row.tyre?.compound);
+              const lapValue = t(locale, "lapProgressValue", {
+                current: row.currentLap ? String(row.currentLap) : "-",
+                total: row.totalLaps ? String(row.totalLaps) : "-",
+              });
 
               return (
                 <button
@@ -107,6 +111,9 @@ export function LiveStandings({
                           {row.tyre.ageLaps !== null ? ` · ${row.tyre.ageLaps}g` : ""}
                         </span>
                       ) : null}
+                      <span className="rounded bg-cyan-300/12 px-1.5 py-0.5 font-bold text-cyan-100">
+                        {t(locale, "lapProgress")} {lapValue}
+                      </span>
                     </div>
                   </div>
 

@@ -448,9 +448,6 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
           return;
         }
 
-        if (response.data.length > 0) {
-          setCurrentTrackPoints(response.data.map(locationToTrackPoint));
-        }
         setTrackPoints((current) => mergeTrackPoints(current, response.data));
         setError(null);
         setRateLimited(false);
@@ -593,7 +590,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     );
     const standingsInterval = window.setInterval(
       loadStandings,
-      fastLivePolling ? 5000 : 9000,
+      fastLivePolling ? 4500 : 5500,
     );
     const raceControlInterval = window.setInterval(
       loadRaceControl,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, Map, Trophy } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
 import { LiveStandings } from "@/components/LiveStandings";
@@ -84,6 +84,18 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   const loadingMessage = demo
     ? t(locale, "loadingDemoReplay")
     : t(locale, "loadingLatestSession");
+  const lapSummary = useMemo(() => {
+    const currentLaps = liveData.standings
+      .map((row) => row.currentLap)
+      .filter((value): value is number => typeof value === "number" && value > 0);
+    const totalLaps =
+      liveData.standings.find((row) => row.totalLaps !== null)?.totalLaps ?? null;
+
+    return {
+      current: currentLaps.length > 0 ? Math.max(...currentLaps) : null,
+      total: totalLaps,
+    };
+  }, [liveData.standings]);
 
   useEffect(() => {
     setLocale(normalizeLocale(window.localStorage.getItem("f1-live-track-locale")));
@@ -193,6 +205,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           meeting={null}
           demo={demo}
           lastUpdated={null}
+          lapSummary={{ current: null, total: null }}
           locale={locale}
           onRefresh={liveData.refresh}
           onToggleDemo={() => setDemo((value) => !value)}
@@ -213,6 +226,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           meeting={null}
           demo={demo}
           lastUpdated={liveData.lastUpdated}
+          lapSummary={lapSummary}
           locale={locale}
           onRefresh={liveData.refresh}
           onToggleDemo={() => setDemo((value) => !value)}
@@ -234,6 +248,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           meeting={liveData.meeting}
           demo={demo}
           lastUpdated={liveData.lastUpdated}
+          lapSummary={lapSummary}
           locale={locale}
           onRefresh={liveData.refresh}
           onToggleDemo={() => setDemo((value) => !value)}

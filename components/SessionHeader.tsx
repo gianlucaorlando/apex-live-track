@@ -19,6 +19,10 @@ interface SessionHeaderProps {
   meeting: F1Meeting | null;
   demo: boolean;
   lastUpdated: string | null;
+  lapSummary: {
+    current: number | null;
+    total: number | null;
+  };
   locale: Locale;
   onRefresh: () => void;
   onToggleDemo: () => void;
@@ -98,6 +102,7 @@ export function SessionHeader({
   meeting,
   demo,
   lastUpdated,
+  lapSummary,
   locale,
   onRefresh,
   onToggleDemo,
@@ -109,6 +114,10 @@ export function SessionHeader({
       : "F1 Live Track";
   const circuit = circuitName(locale, meeting?.circuitShortName ?? session?.circuitShortName);
   const country = countryName(locale, meeting?.countryName ?? session?.countryName);
+  const lapValue = t(locale, "lapProgressValue", {
+    current: lapSummary.current ? String(lapSummary.current) : "-",
+    total: lapSummary.total ? String(lapSummary.total) : "-",
+  });
 
   return (
     <header className="flex flex-col gap-4 border-b border-white/10 bg-neutral-950/95 px-4 py-4 sm:px-6 lg:px-8">
@@ -150,7 +159,7 @@ export function SessionHeader({
         </div>
       </div>
 
-      <div className="grid gap-2 text-xs text-neutral-400 sm:grid-cols-3">
+      <div className="grid gap-2 text-xs text-neutral-400 sm:grid-cols-4">
         <div className="flex items-center gap-2">
           <Gauge className="h-4 w-4 text-red-300" aria-hidden="true" />
           <span>{sessionName(locale, session?.sessionType)}</span>
@@ -162,6 +171,10 @@ export function SessionHeader({
           <span>
             {session ? formatShortDateTime(session.dateStart, locale) : t(locale, "waiting")}
           </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Timer className="h-4 w-4 text-cyan-300" aria-hidden="true" />
+          <span>{t(locale, "lapProgress")} {lapValue}</span>
         </div>
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-amber-300" aria-hidden="true" />
