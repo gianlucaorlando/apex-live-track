@@ -50,7 +50,7 @@ export interface F1CalendarPayload {
   season: number;
   races: F1CalendarRace[];
   generatedAt: string;
-  source: "jolpica";
+  source: "jolpica" | "fallback";
 }
 
 export interface F1CalendarApiResponse {

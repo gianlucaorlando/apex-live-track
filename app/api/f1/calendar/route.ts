@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  createFallbackCalendarPayload,
+  fallbackProviderMessage,
+  isFallbackSeason,
+} from "@/lib/f1FallbackData";
+import {
   apiMessage,
   circuitName,
   countryName,
@@ -441,6 +446,30 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (isFallbackSeason(seasonPath)) {
+      const payload = createFallbackCalendarPayload(locale);
+
+      calendarCache.set(cacheKey, {
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        value: payload,
+      });
+
+      return NextResponse.json(
+        {
+          ...payload,
+          meta: {
+            ...payload.meta,
+            messages: [fallbackProviderMessage(locale)],
+          },
+        },
+        {
+          headers: {
+            "Cache-Control": "public, max-age=0, s-maxage=300",
+          },
+        },
+      );
+    }
+
     const message = apiMessage(
       locale,
       error instanceof Error ? error.message : "Ricerca calendario non riuscita",

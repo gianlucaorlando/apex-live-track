@@ -32,7 +32,7 @@ export interface SeasonStandingsPayload {
   drivers: SeasonDriverStanding[];
   constructors: SeasonConstructorStanding[];
   generatedAt: string;
-  source: "jolpica";
+  source: "jolpica" | "fallback";
 }
 
 export interface SeasonStandingsApiResponse {

@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  createFallbackSeasonStandingsPayload,
+  fallbackProviderMessage,
+  isFallbackSeason,
+} from "@/lib/f1FallbackData";
 import { apiMessage, normalizeLocale } from "@/lib/i18n";
 import type {
   SeasonConstructorStanding,
@@ -283,6 +288,30 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (isFallbackSeason(seasonPath)) {
+      const payload = createFallbackSeasonStandingsPayload(locale);
+
+      standingsCache.set(cacheKey, {
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        value: payload,
+      });
+
+      return NextResponse.json(
+        {
+          ...payload,
+          meta: {
+            ...payload.meta,
+            messages: [fallbackProviderMessage(locale)],
+          },
+        },
+        {
+          headers: {
+            "Cache-Control": "public, max-age=0, s-maxage=300",
+          },
+        },
+      );
+    }
+
     const message = apiMessage(
       locale,
       error instanceof Error ? error.message : "Ricerca classifiche non riuscita",

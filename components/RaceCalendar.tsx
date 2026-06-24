@@ -103,6 +103,14 @@ function formatRaceTime(startsAt: string, locale: Locale): string {
   }).format(new Date(startsAt));
 }
 
+function formatSessionTime(
+  time: string | null,
+  startsAt: string,
+  locale: Locale,
+): string {
+  return time ? formatRaceTime(startsAt, locale) : t(locale, "timeTba");
+}
+
 function formatSessionDay(startsAt: string, locale: Locale): string {
   return new Intl.DateTimeFormat(intlLocale(locale), {
     day: "2-digit",
@@ -216,11 +224,11 @@ function WeekendSessions({
           title={`${sessionName(locale, sessionTranslationKey(session.type))} · ${formatSessionDay(
             session.startsAt,
             locale,
-          )} ${formatRaceTime(session.startsAt, locale)}`}
+          )} ${formatSessionTime(session.time, session.startsAt, locale)}`}
           aria-label={`${sessionName(locale, sessionTranslationKey(session.type))} ${formatSessionDay(
             session.startsAt,
             locale,
-          )} ${formatRaceTime(session.startsAt, locale)}`}
+          )} ${formatSessionTime(session.time, session.startsAt, locale)}`}
           data-calendar-session={session.type}
         >
           <div className="flex min-w-0 items-center justify-between gap-2">
@@ -228,7 +236,7 @@ function WeekendSessions({
               {sessionShortLabel(session.type, locale)}
             </span>
             <span className="text-[0.65rem] font-semibold text-current/62">
-              {formatRaceTime(session.startsAt, locale)}
+              {formatSessionTime(session.time, session.startsAt, locale)}
             </span>
           </div>
           <div className="mt-0.5 truncate text-[0.62rem] font-semibold text-current/55">
@@ -279,7 +287,7 @@ function PodiumGraphic({
       >
         <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em]">
           <Clock className="h-4 w-4" aria-hidden="true" />
-          {formatRaceTime(race.startsAt, locale)}
+          {formatSessionTime(race.time, race.startsAt, locale)}
         </div>
       </div>
     );
