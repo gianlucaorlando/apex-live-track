@@ -13,5 +13,3 @@ services:
         value: "1"
       - key: OPENF1_API_TOKEN
         sync: false
-      - key: GOOGLE_MAPS_API_KEY
-        sync: false

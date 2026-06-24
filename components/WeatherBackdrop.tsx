@@ -158,9 +158,6 @@ export function WeatherBackdrop({ weather, circuitPhoto, locale }: WeatherBackdr
   const weatherStyle = weatherClasses(weather?.condition);
   const photoVisible = Boolean(circuitPhoto);
   const hasCoordinates = weather?.latitude !== undefined && weather.longitude !== undefined;
-  const googleMapUrl = hasCoordinates
-    ? `/api/map/google?lat=${weather.latitude}&lon=${weather.longitude}&zoom=13&maptype=hybrid&lang=${locale}`
-    : "";
   const baseTiles = useMemo(() => {
     if (!hasCoordinates) {
       return [];
@@ -222,12 +219,6 @@ export function WeatherBackdrop({ weather, circuitPhoto, locale }: WeatherBackdr
             />
           ))}
         </div>
-      ) : null}
-      {googleMapUrl ? (
-        <div
-          className={`absolute inset-0 bg-cover bg-center mix-blend-screen saturate-125 ${photoVisible ? "opacity-[0.16]" : "opacity-55"}`}
-          style={{ backgroundImage: `url("${googleMapUrl}")` }}
-        />
       ) : null}
       <div
         className={`absolute inset-0 ${weatherStyle.accent}`}

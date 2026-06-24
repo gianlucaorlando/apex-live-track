@@ -26,18 +26,15 @@ Modalita demo storica:
 open "http://localhost:3000?demo=true"
 ```
 
-## Variabili ambiente
+## Variabili Ambiente
 
-Copia `.env.example` in `.env.local` se hai token OpenF1 o Google Maps:
+Copia `.env.example` in `.env.local` se hai un token OpenF1:
 
 ```bash
 OPENF1_API_TOKEN=...
-GOOGLE_MAPS_API_KEY=...
 ```
 
 Il token e' usato solo lato server nelle route `/api/f1/*` e non viene esposto al client. OpenF1 indica che i dati storici sono generalmente disponibili senza autenticazione, mentre i dati live possono richiedere subscription.
-
-`GOOGLE_MAPS_API_KEY` e' opzionale: abilita il layer Google Maps Static nello sfondo tracciato.
 
 ## Deploy su Render
 
@@ -51,7 +48,6 @@ Questa app usa route API server-side, quindi su Render va pubblicata come **Web 
 4. Collega il repository e conferma il file `render.yaml`.
 5. Inserisci le variabili quando Render le chiede:
    - `OPENF1_API_TOKEN` opzionale, consigliato per dati live
-   - `GOOGLE_MAPS_API_KEY` opzionale, solo per Google Maps
 
 Il Blueprint usa:
 
