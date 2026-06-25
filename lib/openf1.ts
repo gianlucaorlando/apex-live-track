@@ -37,6 +37,7 @@ type OpenF1Params = Record<string, QueryValue>;
 
 interface CacheEntry<T> {
   expiresAt: number;
+  staleUntil: number;
   value: T;
 }
 
@@ -69,6 +70,7 @@ const globalCache = globalThis as typeof globalThis & {
   __f1LiveTrackCache?: Map<string, CacheEntry<unknown>>;
   __f1LiveTrackInflight?: Map<string, Promise<unknown>>;
   __f1LiveTrackNextFetchAt?: number;
+  __f1LiveTrackBackoffUntil?: number;
 };
 
 const memoryCache =
@@ -87,13 +89,29 @@ async function waitForOpenF1Slot(): Promise<void> {
   const now = Date.now();
   const intervalMs = tokenConfigured() ? 180 : 380;
   const nextFetchAt = globalCache.__f1LiveTrackNextFetchAt ?? now;
-  const waitMs = Math.max(0, nextFetchAt - now);
+  const backoffUntil = globalCache.__f1LiveTrackBackoffUntil ?? now;
+  const waitMs = Math.max(0, nextFetchAt - now, backoffUntil - now);
 
   globalCache.__f1LiveTrackNextFetchAt = Math.max(now, nextFetchAt) + intervalMs;
 
   if (waitMs > 0) {
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
+}
+
+function rememberRateLimitBackoff(): void {
+  globalCache.__f1LiveTrackBackoffUntil = Date.now() + (tokenConfigured() ? 3500 : 9000);
+}
+
+function cacheEntry<T>(value: T, ttl: number): CacheEntry<T> {
+  const now = Date.now();
+  const staleMs = Math.max(ttl * 12, 5 * 60 * 1000);
+
+  return {
+    expiresAt: now + ttl,
+    staleUntil: now + staleMs,
+    value,
+  };
 }
 
 function cacheKey(endpoint: string, params: OpenF1Params): string {
@@ -174,6 +192,8 @@ export async function fetchOpenF1Array<T>(
   const ttl = options?.cacheMs ?? 0;
   const key = cacheKey(endpoint, params);
   const cached = memoryCache.get(key) as CacheEntry<T[]> | undefined;
+  const staleCached =
+    cached && cached.staleUntil > Date.now() ? cached.value : null;
 
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
@@ -208,12 +228,18 @@ export async function fetchOpenF1Array<T>(
     if (!response.ok) {
       if (isNoResultsMessage(detail)) {
         if (ttl > 0) {
-          memoryCache.set(key, {
-            expiresAt: Date.now() + ttl,
-            value: [],
-          });
+          memoryCache.set(key, cacheEntry([], ttl));
         }
         return [];
+      }
+
+      if (response.status === 429) {
+        rememberRateLimitBackoff();
+
+        if (staleCached) {
+          memoryCache.set(key, cacheEntry(staleCached, Math.max(ttl, 4000)));
+          return staleCached;
+        }
       }
 
       throw new OpenF1Error(
@@ -226,10 +252,7 @@ export async function fetchOpenF1Array<T>(
     if (!Array.isArray(payload)) {
       if (isNoResultsMessage(detail)) {
         if (ttl > 0) {
-          memoryCache.set(key, {
-            expiresAt: Date.now() + ttl,
-            value: [],
-          });
+          memoryCache.set(key, cacheEntry([], ttl));
         }
         return [];
       }
@@ -241,10 +264,7 @@ export async function fetchOpenF1Array<T>(
     }
 
     if (ttl > 0) {
-      memoryCache.set(key, {
-        expiresAt: Date.now() + ttl,
-        value: payload,
-      });
+      memoryCache.set(key, cacheEntry(payload, ttl));
     }
 
     return payload as T[];
@@ -256,7 +276,18 @@ export async function fetchOpenF1Array<T>(
     return await requestPromise;
   } catch (error) {
     if (error instanceof OpenF1Error) {
+      if (error.rateLimited && staleCached) {
+        rememberRateLimitBackoff();
+        memoryCache.set(key, cacheEntry(staleCached, Math.max(ttl, 4000)));
+        return staleCached;
+      }
+
       throw error;
+    }
+
+    if (staleCached) {
+      memoryCache.set(key, cacheEntry(staleCached, Math.max(ttl, 4000)));
+      return staleCached;
     }
 
     const message =

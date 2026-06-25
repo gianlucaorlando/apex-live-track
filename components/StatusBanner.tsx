@@ -36,14 +36,14 @@ export function StatusBanner({
     return null;
   }
 
-  const tone = error || rateLimited ? "red" : noSessionToday ? "amber" : "cyan";
+  const tone = error ? "red" : rateLimited || noSessionToday ? "amber" : "cyan";
   const toneClass =
     tone === "red"
       ? "border-red-400/30 bg-red-950/35 text-red-50"
       : tone === "amber"
         ? "border-amber-300/30 bg-amber-950/25 text-amber-50"
         : "border-cyan-300/30 bg-cyan-950/25 text-cyan-50";
-  const Icon = error || rateLimited ? AlertTriangle : noSessionToday ? Radio : Info;
+  const Icon = error ? AlertTriangle : rateLimited ? Info : noSessionToday ? Radio : Info;
   const title = error
     ? t(locale, "apiError")
     : rateLimited

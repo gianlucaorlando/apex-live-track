@@ -209,11 +209,18 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [loadedDemo, setLoadedDemo] = useState<boolean | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const replayStartedAt = useRef(Date.now());
+  const hasUsableDataRef = useRef(false);
 
   const refresh = useCallback(() => {
     replayStartedAt.current = Date.now();
     setRefreshNonce((value) => value + 1);
   }, []);
+
+  useEffect(() => {
+    hasUsableDataRef.current = Boolean(
+      session || standings.length > 0 || trackPoints.length > 0 || raceControlMessages.length > 0,
+    );
+  }, [raceControlMessages.length, session, standings.length, trackPoints.length]);
 
   useEffect(() => {
     replayStartedAt.current = Date.now();
@@ -298,6 +305,16 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
                 500,
                 false,
               );
+
+        if (clientError.rateLimited && hasUsableDataRef.current) {
+          setError(null);
+          setLoadedDemo(demo);
+          setRateLimited(true);
+          setTokenConfigured((current) => clientError.meta?.tokenConfigured ?? current);
+          setPartial(true);
+          setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
+          return;
+        }
 
         setError(apiMessage(locale, clientError.message));
         setSession(null);
@@ -533,7 +550,9 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
                 false,
               );
 
-        setError((current) => current ?? apiMessage(locale, clientError.message));
+        if (!(clientError.rateLimited && hasUsableDataRef.current)) {
+          setError((current) => current ?? apiMessage(locale, clientError.message));
+        }
         setRateLimited(clientError.rateLimited);
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
@@ -590,18 +609,19 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       raceControlStartupTimeout = window.setTimeout(loadRaceControl, 1100);
     }, 1300);
     const fastLivePolling = activeSession.isLive && tokenConfigured;
+    const pollingMultiplier = rateLimited ? (tokenConfigured ? 1.8 : 3) : 1;
 
     const locationInterval = window.setInterval(
       loadLocation,
-      fastLivePolling ? 2800 : 5000,
+      Math.round((fastLivePolling ? 3000 : 7000) * pollingMultiplier),
     );
     const standingsInterval = window.setInterval(
       loadStandings,
-      fastLivePolling ? 4500 : 5500,
+      Math.round((fastLivePolling ? 5000 : 7000) * pollingMultiplier),
     );
     const raceControlInterval = window.setInterval(
       loadRaceControl,
-      fastLivePolling ? 7000 : 12000,
+      Math.round((fastLivePolling ? 9000 : 18000) * pollingMultiplier),
     );
 
     return () => {
@@ -620,7 +640,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         controller.abort();
       }
     };
-  }, [demo, locale, loadedDemo, session, refreshNonce, tokenConfigured]);
+  }, [demo, locale, loadedDemo, rateLimited, session, refreshNonce, tokenConfigured]);
 
   const hasCurrentModeData = loadedDemo === demo;
   const currentLoading = loading || !hasCurrentModeData;

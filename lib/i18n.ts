@@ -48,7 +48,7 @@ const UI_TRANSLATIONS = {
     statusTokenTitle: "Token live non configurato",
     statusPartialTitle: "Dati parziali",
     statusRateLimitBody:
-      "Troppe richieste verso OpenF1. Il polling continua con cache e intervalli ridotti.",
+      "Troppe richieste verso OpenF1. Il polling continua con cache e intervalli rallentati.",
     statusNoSessionBody: "La dashboard mostra l'ultimo evento disponibile come replay.",
     statusDemoBody: "Sessione storica OpenF1 caricata in modalita replay.",
     statusTokenBody:
