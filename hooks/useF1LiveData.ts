@@ -201,6 +201,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
+  const [pollingBackoff, setPollingBackoff] = useState(false);
   const [tokenConfigured, setTokenConfigured] = useState(false);
   const [partial, setPartial] = useState(false);
   const [messages, setMessages] = useState<string[]>([]);
@@ -275,6 +276,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setMeeting(meetingResponse.data);
         setDrivers(driverResponse.data);
         setLoadedDemo(demo);
+        setPollingBackoff(false);
         setTokenConfigured(sessionResponse.meta.tokenConfigured);
         setPartial(
           sessionResponse.meta.partial ||
@@ -309,7 +311,8 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         if (clientError.rateLimited && hasUsableDataRef.current) {
           setError(null);
           setLoadedDemo(demo);
-          setRateLimited(true);
+          setPollingBackoff(true);
+          setRateLimited(false);
           setTokenConfigured((current) => clientError.meta?.tokenConfigured ?? current);
           setPartial(true);
           setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
@@ -325,6 +328,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setCurrentTrackPoints([]);
         setLoadedDemo(demo);
         setRateLimited(clientError.rateLimited);
+        setPollingBackoff(clientError.rateLimited);
         setTokenConfigured(clientError.meta?.tokenConfigured ?? false);
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
@@ -366,6 +370,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         }
 
         setFinishLine(response.data);
+        setPollingBackoff(false);
         setTokenConfigured(response.meta.tokenConfigured);
         setPartial((current) => current || response.meta.partial);
         setMessages((current) => mergeMessages(current, response.meta, locale));
@@ -385,7 +390,10 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
                 false,
               );
 
-        setRateLimited((current) => current || clientError.rateLimited);
+        setPollingBackoff((current) => current || clientError.rateLimited);
+        setRateLimited((current) =>
+          current || (clientError.rateLimited && !hasUsableDataRef.current),
+        );
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
       }
@@ -475,6 +483,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setTrackPoints((current) => mergeTrackPoints(current, response.data));
         setError(null);
         setRateLimited(false);
+        setPollingBackoff(false);
         setTokenConfigured(response.meta.tokenConfigured);
         setPartial((current) => current || response.meta.partial);
         setMessages((current) => mergeMessages(current, response.meta, locale));
@@ -493,7 +502,8 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
                 false,
               );
 
-        setRateLimited(clientError.rateLimited);
+        setPollingBackoff((current) => current || clientError.rateLimited);
+        setRateLimited(clientError.rateLimited && !hasUsableDataRef.current);
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
       });
@@ -515,6 +525,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setStandings(response.data.rows);
         setError(null);
         setRateLimited(false);
+        setPollingBackoff(false);
         if (response.data.trackPoints.length > 0) {
           setCurrentTrackPoints(response.data.trackPoints);
         }
@@ -553,7 +564,8 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         if (!(clientError.rateLimited && hasUsableDataRef.current)) {
           setError((current) => current ?? apiMessage(locale, clientError.message));
         }
-        setRateLimited(clientError.rateLimited);
+        setPollingBackoff((current) => current || clientError.rateLimited);
+        setRateLimited(clientError.rateLimited && !hasUsableDataRef.current);
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
       });
@@ -579,6 +591,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         }
 
         setRaceControlMessages(response.data);
+        setPollingBackoff(false);
         setTokenConfigured(response.meta.tokenConfigured);
         setPartial((current) => current || response.meta.partial);
         setMessages((current) => mergeMessages(current, response.meta, locale));
@@ -596,7 +609,10 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
                 false,
               );
 
-        setRateLimited((current) => current || clientError.rateLimited);
+        setPollingBackoff((current) => current || clientError.rateLimited);
+        setRateLimited((current) =>
+          current || (clientError.rateLimited && !hasUsableDataRef.current),
+        );
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
       });
     }
@@ -609,7 +625,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       raceControlStartupTimeout = window.setTimeout(loadRaceControl, 1100);
     }, 1300);
     const fastLivePolling = activeSession.isLive && tokenConfigured;
-    const pollingMultiplier = rateLimited ? (tokenConfigured ? 1.8 : 3) : 1;
+    const pollingMultiplier = pollingBackoff ? (tokenConfigured ? 1.8 : 3) : 1;
 
     const locationInterval = window.setInterval(
       loadLocation,
@@ -640,7 +656,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         controller.abort();
       }
     };
-  }, [demo, locale, loadedDemo, rateLimited, session, refreshNonce, tokenConfigured]);
+  }, [demo, locale, loadedDemo, pollingBackoff, session, refreshNonce, tokenConfigured]);
 
   const hasCurrentModeData = loadedDemo === demo;
   const currentLoading = loading || !hasCurrentModeData;
