@@ -60,6 +60,12 @@ interface TrackMapProps {
 const SVG_WIDTH = 1000;
 const SVG_HEIGHT = 680;
 const SVG_PADDING = 54;
+// Keeps avatars moving briefly when OpenF1 serves stale data during rate limits.
+const COAST_MAX_ELAPSED_MS = 24000;
+const COAST_DECAY_MS = 9000;
+const COAST_SAMPLE_MIN_MS = 1200;
+const COAST_SAMPLE_MAX_MS = 8000;
+const COAST_MAX_PROGRESS = 3.25;
 
 function weatherNumber(value: number | null | undefined, digits = 0): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -521,19 +527,97 @@ function getLatestTrackPointByDriver(points: TrackPoint[]): Map<number, TrackPoi
   return latest;
 }
 
+type TimedTrackPoint = {
+  point: TrackPoint;
+  time: number;
+};
+
+type MotionTrackPoint = TrackPoint & {
+  coasted?: boolean;
+};
+
+type TrackPointBucket = {
+  before: TimedTrackPoint | null;
+  after: TimedTrackPoint | null;
+  reference: TimedTrackPoint | null;
+  nearestPrevious: TimedTrackPoint | null;
+};
+
+function interpolatePoint(
+  driverNumber: number,
+  before: TimedTrackPoint,
+  after: TimedTrackPoint,
+  targetTimeMs: number,
+): TrackPoint {
+  const progress = (targetTimeMs - before.time) / (after.time - before.time);
+  const clampedProgress = Math.min(Math.max(progress, 0), 1);
+
+  return {
+    driverNumber,
+    date: new Date(targetTimeMs).toISOString(),
+    x: before.point.x + (after.point.x - before.point.x) * clampedProgress,
+    y: before.point.y + (after.point.y - before.point.y) * clampedProgress,
+    z:
+      before.point.z !== undefined &&
+      before.point.z !== null &&
+      after.point.z !== undefined &&
+      after.point.z !== null
+        ? before.point.z + (after.point.z - before.point.z) * clampedProgress
+        : before.point.z,
+  };
+}
+
+function coastPoint(
+  driverNumber: number,
+  latest: TimedTrackPoint,
+  reference: TimedTrackPoint | null,
+  targetTimeMs: number,
+): MotionTrackPoint | null {
+  if (!reference) {
+    return null;
+  }
+
+  const sampleDuration = latest.time - reference.time;
+  const elapsed = targetTimeMs - latest.time;
+
+  if (sampleDuration <= 0 || elapsed <= 0) {
+    return null;
+  }
+
+  const cappedElapsed = Math.min(elapsed, COAST_MAX_ELAPSED_MS);
+  const easedElapsed =
+    COAST_MAX_ELAPSED_MS * (1 - Math.exp(-cappedElapsed / COAST_DECAY_MS));
+  const progress = Math.min(easedElapsed / sampleDuration, COAST_MAX_PROGRESS);
+  const xVelocity = latest.point.x - reference.point.x;
+  const yVelocity = latest.point.y - reference.point.y;
+  const referenceZ = reference.point.z;
+  const latestZ = latest.point.z;
+
+  return {
+    driverNumber,
+    date: new Date(targetTimeMs).toISOString(),
+    x: latest.point.x + xVelocity * progress,
+    y: latest.point.y + yVelocity * progress,
+    coasted: true,
+    z:
+      typeof latestZ === "number" &&
+      Number.isFinite(latestZ) &&
+      typeof referenceZ === "number" &&
+      Number.isFinite(referenceZ)
+        ? latestZ + (latestZ - referenceZ) * progress
+        : latestZ,
+  };
+}
+
+function isCoastedPoint(point: TrackPoint): boolean {
+  return (point as MotionTrackPoint).coasted === true;
+}
+
 function getInterpolatedTrackPointByDriver(
   points: TrackPoint[],
   targetTimeMs: number,
 ): Map<number, TrackPoint> {
-  const byDriver = new Map<
-    number,
-    {
-      before: TrackPoint | null;
-      beforeTime: number;
-      after: TrackPoint | null;
-      afterTime: number;
-    }
-  >();
+  const byDriver = new Map<number, TrackPointBucket>();
 
   for (const point of points) {
     if (typeof point.driverNumber !== "number" || point.driverNumber <= 0) {
@@ -545,59 +629,127 @@ function getInterpolatedTrackPointByDriver(
       continue;
     }
 
+    const sample = { point, time };
     const bucket =
       byDriver.get(point.driverNumber) ??
       {
         before: null,
-        beforeTime: Number.NEGATIVE_INFINITY,
         after: null,
-        afterTime: Number.POSITIVE_INFINITY,
+        reference: null,
+        nearestPrevious: null,
       };
 
-    if (time <= targetTimeMs && time > bucket.beforeTime) {
-      bucket.before = point;
-      bucket.beforeTime = time;
+    if (time <= targetTimeMs && (!bucket.before || time >= bucket.before.time)) {
+      bucket.before = sample;
     }
 
-    if (time >= targetTimeMs && time < bucket.afterTime) {
-      bucket.after = point;
-      bucket.afterTime = time;
+    if (time >= targetTimeMs && (!bucket.after || time < bucket.after.time)) {
+      bucket.after = sample;
     }
 
     byDriver.set(point.driverNumber, bucket);
   }
 
-  const result = new Map<number, TrackPoint>();
-
-  for (const [driverNumber, bucket] of byDriver) {
-    if (bucket.before && bucket.after && bucket.afterTime !== bucket.beforeTime) {
-      const progress =
-        (targetTimeMs - bucket.beforeTime) / (bucket.afterTime - bucket.beforeTime);
-      const clampedProgress = Math.min(Math.max(progress, 0), 1);
-
-      result.set(driverNumber, {
-        driverNumber,
-        date: new Date(targetTimeMs).toISOString(),
-        x: bucket.before.x + (bucket.after.x - bucket.before.x) * clampedProgress,
-        y: bucket.before.y + (bucket.after.y - bucket.before.y) * clampedProgress,
-        z:
-          bucket.before.z !== undefined &&
-          bucket.before.z !== null &&
-          bucket.after.z !== undefined &&
-          bucket.after.z !== null
-            ? bucket.before.z + (bucket.after.z - bucket.before.z) * clampedProgress
-            : bucket.before.z,
-      });
+  for (const point of points) {
+    if (typeof point.driverNumber !== "number" || point.driverNumber <= 0) {
       continue;
     }
 
-    const fallback = bucket.before ?? bucket.after;
+    const time = pointTime(point);
+    const bucket = byDriver.get(point.driverNumber);
+
+    if (!bucket?.before || time <= 0) {
+      continue;
+    }
+
+    const sampleAge = bucket.before.time - time;
+    if (sampleAge <= 0) {
+      continue;
+    }
+
+    const sample = { point, time };
+    if (!bucket.nearestPrevious || time > bucket.nearestPrevious.time) {
+      bucket.nearestPrevious = sample;
+    }
+
+    if (
+      sampleAge >= COAST_SAMPLE_MIN_MS &&
+      sampleAge <= COAST_SAMPLE_MAX_MS &&
+      (!bucket.reference || sampleAge > bucket.before.time - bucket.reference.time)
+    ) {
+      bucket.reference = sample;
+    }
+  }
+
+  const result = new Map<number, TrackPoint>();
+
+  for (const [driverNumber, bucket] of byDriver) {
+    const { before, after } = bucket;
+    if (before && after && after.time !== before.time) {
+      result.set(driverNumber, interpolatePoint(driverNumber, before, after, targetTimeMs));
+      continue;
+    }
+
+    if (before && targetTimeMs > before.time) {
+      const coastedPoint = coastPoint(
+        driverNumber,
+        before,
+        bucket.reference ?? bucket.nearestPrevious,
+        targetTimeMs,
+      );
+
+      if (coastedPoint) {
+        result.set(driverNumber, coastedPoint);
+        continue;
+      }
+    }
+
+    const fallback = before?.point ?? after?.point;
     if (fallback) {
       result.set(driverNumber, fallback);
     }
   }
 
   return result;
+}
+
+function projectOntoTrack(
+  point: NormalizedTrackPoint,
+  polyline: NormalizedTrackPoint[],
+): NormalizedTrackPoint {
+  if (polyline.length < 2) {
+    return point;
+  }
+
+  let bestPoint: Pick<NormalizedTrackPoint, "x" | "y"> | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < polyline.length; index += 1) {
+    const start = polyline[index - 1];
+    const end = polyline[index];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared <= 0) {
+      continue;
+    }
+
+    const progress = Math.min(
+      Math.max(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0),
+      1,
+    );
+    const x = start.x + dx * progress;
+    const y = start.y + dy * progress;
+    const distance = (point.x - x) ** 2 + (point.y - y) ** 2;
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestPoint = { x, y };
+    }
+  }
+
+  return bestPoint ? { ...point, ...bestPoint } : point;
 }
 
 function nearestSegmentAngle(
@@ -730,6 +882,10 @@ export function TrackMap({
           return null;
         }
 
+        const displayPoint = isCoastedPoint(markerPoint)
+          ? projectOntoTrack(normalized, baseData.polyline)
+          : normalized;
+
         return {
           driverNumber: row.driverNumber,
           acronym: row.acronym,
@@ -744,15 +900,16 @@ export function TrackMap({
           tyre: row.tyre,
           currentLap: row.currentLap,
           totalLaps: row.totalLaps,
-          x: normalized.x,
-          y: normalized.y,
-          rawX: normalized.rawX,
-          rawY: normalized.rawY,
+          x: displayPoint.x,
+          y: displayPoint.y,
+          rawX: displayPoint.rawX,
+          rawY: displayPoint.rawY,
         } satisfies NormalizedDriverPosition;
       })
       .filter((driver): driver is NormalizedDriverPosition => driver !== null);
   }, [
     baseData.normalizer,
+    baseData.polyline,
     currentTrackPoints,
     motionTimeMs,
     standingTrackPoints,
