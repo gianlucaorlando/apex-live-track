@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  getOpenF1AccessToken,
+  openF1AuthConfigured,
+} from "@/lib/openf1Auth";
 import { apiMessage, normalizeLocale, type Locale } from "@/lib/i18n";
 import {
   DEMO_REPLAY_OFFSET_SECONDS,
@@ -82,7 +86,7 @@ const inflightCache =
 globalCache.__f1LiveTrackInflight = inflightCache;
 
 function tokenConfigured(): boolean {
-  return Boolean(process.env.OPENF1_API_TOKEN);
+  return openF1AuthConfigured();
 }
 
 async function waitForOpenF1Slot(): Promise<void> {
@@ -210,12 +214,13 @@ export async function fetchOpenF1Array<T>(
     Accept: "application/json",
   };
 
-  if (process.env.OPENF1_API_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.OPENF1_API_TOKEN}`;
-  }
-
   const requestPromise = (async () => {
     await waitForOpenF1Slot();
+    const accessToken = await getOpenF1AccessToken();
+
+    if (accessToken) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
 
     const response = await fetch(buildUrl(endpoint, params), {
       cache: "no-store",

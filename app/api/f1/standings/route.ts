@@ -20,6 +20,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const context = await resolveSessionContext(request);
+    const url = new URL(request.url);
+    const skipLocations = url.searchParams.get("skip_locations") === "true";
     const tyreDataPromise = Promise.all([
       fetchTyreStintsForSession(context.session.sessionKey, context.session.isLive),
       fetchLapsForRequest(request, context.session),
@@ -48,7 +50,7 @@ export async function GET(request: Request) {
           fetchPositionsForSession(context.session.sessionKey, context.session.isLive),
         ),
         fetchIntervalsForRequest(request, context.session, 45),
-        fetchLocationsForRequest(request, context.session, 45),
+        skipLocations ? Promise.resolve([]) : fetchLocationsForRequest(request, context.session, 45),
         tyreDataPromise,
         sessionResultsPromise,
       ]);
@@ -81,7 +83,7 @@ export async function GET(request: Request) {
       messages.push("Dati intervallo parziali o non disponibili per questa sessione.");
     }
 
-    if (locations.length === 0) {
+    if (!skipLocations && locations.length === 0) {
       messages.push("Dati posizione parziali o non disponibili per questa finestra.");
     }
 

@@ -235,3 +235,33 @@ export interface StandingsPayload {
   rows: LiveStandingRow[];
   trackPoints: TrackPoint[];
 }
+
+export type F1LiveStreamEvent =
+  | {
+      type: "location";
+      generatedAt: string;
+      data: F1LocationPoint;
+    }
+  | {
+      type: "position";
+      generatedAt: string;
+      data: F1Position;
+    }
+  | {
+      type: "interval";
+      generatedAt: string;
+      data: F1Interval;
+    }
+  | {
+      type: "race-control";
+      generatedAt: string;
+      data: RaceControlMessage;
+    }
+  | {
+      type: "status";
+      generatedAt: string;
+      data: {
+        status: "connected" | "subscribed" | "error" | "closed";
+        message?: string;
+      };
+    };

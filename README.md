@@ -9,6 +9,7 @@ Dashboard full-stack Next.js per visualizzare una sessione Formula 1 con dati Op
 - React
 - Tailwind CSS
 - Route Handlers server-side verso OpenF1
+- Stream live server-side via MQTT-over-WebSocket OpenF1 + SSE verso browser
 - Nessun database
 
 ## Avvio
@@ -32,9 +33,12 @@ Copia `.env.example` in `.env.local` se hai un token OpenF1:
 
 ```bash
 OPENF1_API_TOKEN=...
+# In alternativa, per dati live con refresh automatico token:
+OPENF1_USERNAME=...
+OPENF1_PASSWORD=...
 ```
 
-Il token e' usato solo lato server nelle route `/api/f1/*` e non viene esposto al client. OpenF1 indica che i dati storici sono generalmente disponibili senza autenticazione, mentre i dati live possono richiedere subscription.
+Le credenziali sono usate solo lato server nelle route `/api/f1/*` e nello stream `/api/f1/live-stream`; non vengono esposte al client. OpenF1 indica che i dati storici sono generalmente disponibili senza autenticazione, mentre i dati live possono richiedere subscription. Quando la sessione e' live e l'autenticazione OpenF1 e' configurata, il backend apre MQTT-over-WebSocket verso OpenF1 e il browser riceve eventi SSE, riducendo il polling REST sulle coordinate.
 
 ## Deploy su Render
 
@@ -48,6 +52,7 @@ Questa app usa route API server-side, quindi su Render va pubblicata come **Web 
 4. Collega il repository e conferma il file `render.yaml`.
 5. Inserisci le variabili quando Render le chiede:
    - `OPENF1_API_TOKEN` opzionale, consigliato per dati live
+   - `OPENF1_USERNAME` e `OPENF1_PASSWORD` opzionali, consigliati per streaming live con refresh token automatico
 
 Il Blueprint usa:
 
@@ -79,6 +84,7 @@ Se usi il piano gratuito, il servizio puo andare in sleep dopo inattivita e impi
 - `GET /api/f1/positions`
 - `GET /api/f1/intervals`
 - `GET /api/f1/standings`
+- `GET /api/f1/live-stream`
 
 Tutte supportano:
 

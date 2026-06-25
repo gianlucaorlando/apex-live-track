@@ -2,15 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEMO_REPLAY_OFFSET_SECONDS } from "@/lib/f1Constants";
+import { formatGap, formatInterval } from "@/lib/format";
 import { apiMessage, t, type Locale } from "@/lib/i18n";
 import { locationToTrackPoint } from "@/lib/track";
 import type {
   F1ApiMeta,
   F1ApiResponse,
   F1Driver,
+  F1Interval,
+  F1LiveStreamEvent,
   FinishLinePoint,
   F1LocationPoint,
   F1Meeting,
+  F1Position,
   F1Session,
   LiveStandingRow,
   RaceControlMessage,
@@ -29,6 +33,7 @@ interface ApiErrorPayload {
 const LIVE_MOTION_LAG_MS = 6000;
 const REPLAY_MOTION_LAG_MS = 7000;
 const MOTION_FRAME_MS = 40;
+const STREAM_LOCATION_FLUSH_MS = 80;
 
 class ClientApiError extends Error {
   status: number;
@@ -190,6 +195,92 @@ function mergeTrackPoints(existing: TrackPoint[], incoming: F1LocationPoint[]): 
     .slice(-18000);
 }
 
+function sortStandings(rows: LiveStandingRow[]): LiveStandingRow[] {
+  return [...rows].sort((a, b) => {
+    if (a.position === null && b.position === null) {
+      return a.driverNumber - b.driverNumber;
+    }
+
+    if (a.position === null) {
+      return 1;
+    }
+
+    if (b.position === null) {
+      return -1;
+    }
+
+    return a.position - b.position;
+  });
+}
+
+function applyStreamPosition(
+  rows: LiveStandingRow[],
+  position: F1Position,
+  locale: Locale,
+): LiveStandingRow[] {
+  let changed = false;
+  const nextRows = rows.map((row) => {
+    if (row.driverNumber !== position.driverNumber) {
+      return row;
+    }
+
+    changed = true;
+    return {
+      ...row,
+      position: position.position,
+      gap: position.position === 1 ? formatGap(null, position.position, locale) : row.gap,
+      interval:
+        position.position === 1 ? formatInterval(null, position.position, locale) : row.interval,
+      updatedAt: position.date || row.updatedAt,
+    };
+  });
+
+  return changed ? sortStandings(nextRows) : rows;
+}
+
+function applyStreamInterval(
+  rows: LiveStandingRow[],
+  interval: F1Interval,
+  locale: Locale,
+): LiveStandingRow[] {
+  let changed = false;
+  const nextRows = rows.map((row) => {
+    if (row.driverNumber !== interval.driverNumber) {
+      return row;
+    }
+
+    changed = true;
+    return {
+      ...row,
+      gap: formatGap(interval.gapToLeader, row.position, locale),
+      interval: formatInterval(interval.interval, row.position, locale),
+      updatedAt: interval.date || row.updatedAt,
+    };
+  });
+
+  return changed ? nextRows : rows;
+}
+
+function mergeRaceControlMessage(
+  messages: RaceControlMessage[],
+  incoming: RaceControlMessage,
+): RaceControlMessage[] {
+  const key = `${incoming.date}-${incoming.category}-${incoming.message}-${incoming.driverNumber ?? "x"}`;
+  const exists = messages.some(
+    (message) =>
+      `${message.date}-${message.category}-${message.message}-${message.driverNumber ?? "x"}` ===
+      key,
+  );
+
+  if (exists) {
+    return messages;
+  }
+
+  return [incoming, ...messages]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 80);
+}
+
 export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResult {
   const [session, setSession] = useState<F1Session | null>(null);
   const [meeting, setMeeting] = useState<F1Meeting | null>(null);
@@ -203,6 +294,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [error, setError] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
   const [pollingBackoff, setPollingBackoff] = useState(false);
+  const [streamActive, setStreamActive] = useState(false);
   const [tokenConfigured, setTokenConfigured] = useState(false);
   const [partial, setPartial] = useState(false);
   const [messages, setMessages] = useState<string[]>([]);
@@ -236,6 +328,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     setFinishLine(null);
     setMotionTimeMs(null);
     setLastUpdated(null);
+    setStreamActive(false);
   }, [demo]);
 
   useEffect(() => {
@@ -455,6 +548,115 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   }, [demo, loadedDemo, session]);
 
   useEffect(() => {
+    if (!session || loadedDemo !== demo || demo || !session.isLive || !tokenConfigured) {
+      setStreamActive(false);
+      return;
+    }
+
+    let disposed = false;
+    let pendingLocations: F1LocationPoint[] = [];
+    let flushTimeout: number | undefined;
+    const params = new URLSearchParams({
+      session_key: String(session.sessionKey),
+      meeting_key: String(session.meetingKey),
+      lang: locale,
+    });
+    const source = new EventSource(`/api/f1/live-stream?${params.toString()}`);
+
+    function flushLocations() {
+      flushTimeout = undefined;
+
+      if (disposed || pendingLocations.length === 0) {
+        pendingLocations = [];
+        return;
+      }
+
+      const locations = pendingLocations;
+      pendingLocations = [];
+      setCurrentTrackPoints((current) => mergeTrackPoints(current, locations));
+      setTrackPoints((current) => mergeTrackPoints(current, locations));
+      setLastUpdated(locations.at(-1)?.date ?? new Date().toISOString());
+      setPollingBackoff(false);
+      setRateLimited(false);
+    }
+
+    function enqueueLocation(location: F1LocationPoint) {
+      pendingLocations.push(location);
+
+      if (flushTimeout === undefined) {
+        flushTimeout = window.setTimeout(flushLocations, STREAM_LOCATION_FLUSH_MS);
+      }
+    }
+
+    function handleStreamEvent(message: MessageEvent<string>) {
+      let event: F1LiveStreamEvent;
+
+      try {
+        event = JSON.parse(message.data) as F1LiveStreamEvent;
+      } catch {
+        return;
+      }
+
+      if (event.type === "status") {
+        if (event.data.status === "subscribed" || event.data.status === "connected") {
+          setStreamActive(true);
+        } else if (event.data.status === "error" || event.data.status === "closed") {
+          setStreamActive(false);
+        }
+        return;
+      }
+
+      setStreamActive(true);
+      setLastUpdated(event.generatedAt);
+
+      if (event.type === "location") {
+        enqueueLocation(event.data);
+        return;
+      }
+
+      if (event.type === "position") {
+        setStandings((current) => applyStreamPosition(current, event.data, locale));
+        return;
+      }
+
+      if (event.type === "interval") {
+        setStandings((current) => applyStreamInterval(current, event.data, locale));
+        return;
+      }
+
+      if (event.type === "race-control") {
+        setRaceControlMessages((current) => mergeRaceControlMessage(current, event.data));
+      }
+    }
+
+    source.addEventListener("f1", handleStreamEvent);
+    source.onerror = () => {
+      if (!disposed) {
+        setStreamActive(false);
+      }
+    };
+
+    return () => {
+      disposed = true;
+      setStreamActive(false);
+      source.removeEventListener("f1", handleStreamEvent);
+      source.close();
+
+      if (flushTimeout !== undefined) {
+        window.clearTimeout(flushTimeout);
+      }
+    };
+  }, [
+    demo,
+    loadedDemo,
+    locale,
+    session?.isLive,
+    session?.meetingKey,
+    session?.sessionKey,
+    tokenConfigured,
+  ]);
+
+  useEffect(() => {
     if (!session || loadedDemo !== demo) {
       return;
     }
@@ -525,6 +727,9 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     async function loadStandings() {
       await withController(async (signal) => {
         const params = buildParams(demo, activeSession, replayStartedAt.current, locale);
+        if (activeSession.isLive && streamActive) {
+          params.set("skip_locations", "true");
+        }
         const response = await fetchApi<StandingsPayload>(
           "/api/f1/standings",
           params,
@@ -632,18 +837,24 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
 
     let standingsStartupTimeout: number | undefined;
     let raceControlStartupTimeout: number | undefined;
+    const locationPollingEnabled =
+      !activeSession.isLive || !tokenConfigured || !streamActive;
     const startupTimeout = window.setTimeout(() => {
-      loadLocation(activeSession.isLive ? 120 : 180);
+      if (locationPollingEnabled) {
+        loadLocation(activeSession.isLive ? 120 : 180);
+      }
       standingsStartupTimeout = window.setTimeout(loadStandings, 700);
       raceControlStartupTimeout = window.setTimeout(loadRaceControl, 1100);
     }, 1300);
     const fastLivePolling = activeSession.isLive && tokenConfigured;
     const pollingMultiplier = pollingBackoff ? (tokenConfigured ? 1.8 : 3) : 1;
 
-    const locationInterval = window.setInterval(
-      loadLocation,
-      Math.round((fastLivePolling ? 3000 : 7000) * pollingMultiplier),
-    );
+    const locationInterval = locationPollingEnabled
+      ? window.setInterval(
+          loadLocation,
+          Math.round((fastLivePolling ? 3000 : 7000) * pollingMultiplier),
+        )
+      : undefined;
     const standingsInterval = window.setInterval(
       loadStandings,
       Math.round((fastLivePolling ? 5000 : 7000) * pollingMultiplier),
@@ -662,14 +873,25 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       if (raceControlStartupTimeout !== undefined) {
         window.clearTimeout(raceControlStartupTimeout);
       }
-      window.clearInterval(locationInterval);
+      if (locationInterval !== undefined) {
+        window.clearInterval(locationInterval);
+      }
       window.clearInterval(standingsInterval);
       window.clearInterval(raceControlInterval);
       for (const controller of controllers) {
         controller.abort();
       }
     };
-  }, [demo, locale, loadedDemo, pollingBackoff, session, refreshNonce, tokenConfigured]);
+  }, [
+    demo,
+    locale,
+    loadedDemo,
+    pollingBackoff,
+    session,
+    refreshNonce,
+    streamActive,
+    tokenConfigured,
+  ]);
 
   const hasCurrentModeData = loadedDemo === demo;
   const currentLoading = loading || !hasCurrentModeData;
