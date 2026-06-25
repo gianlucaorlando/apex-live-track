@@ -66,6 +66,7 @@ const COAST_DECAY_MS = 9000;
 const COAST_SAMPLE_MIN_MS = 1200;
 const COAST_SAMPLE_MAX_MS = 8000;
 const COAST_MAX_PROGRESS = 3.25;
+const MARKER_TRANSITION_MS = 90;
 
 function weatherNumber(value: number | null | undefined, digits = 0): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -1204,7 +1205,7 @@ export function TrackMap({
               }}
               style={{
                 transform: `translate(${driver.x}px, ${driver.y}px)`,
-                transition: "transform 180ms linear, opacity 160ms ease",
+                transition: `transform ${MARKER_TRANSITION_MS}ms linear, opacity 160ms ease`,
                 transformBox: "fill-box",
                 transformOrigin: "center",
                 willChange: "transform",

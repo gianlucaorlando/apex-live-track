@@ -28,6 +28,7 @@ interface ApiErrorPayload {
 
 const LIVE_MOTION_LAG_MS = 6000;
 const REPLAY_MOTION_LAG_MS = 7000;
+const MOTION_FRAME_MS = 40;
 
 class ClientApiError extends Error {
   status: number;
@@ -434,10 +435,22 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     }
 
     updateMotionTime();
-    const motionInterval = window.setInterval(updateMotionTime, 120);
+    let lastMotionFrameAt = 0;
+    let animationFrame = 0;
+
+    function tick(now: number) {
+      if (now - lastMotionFrameAt >= MOTION_FRAME_MS) {
+        lastMotionFrameAt = now;
+        updateMotionTime();
+      }
+
+      animationFrame = window.requestAnimationFrame(tick);
+    }
+
+    animationFrame = window.requestAnimationFrame(tick);
 
     return () => {
-      window.clearInterval(motionInterval);
+      window.cancelAnimationFrame(animationFrame);
     };
   }, [demo, loadedDemo, session]);
 
