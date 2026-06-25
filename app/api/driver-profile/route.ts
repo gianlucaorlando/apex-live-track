@@ -56,6 +56,10 @@ const FALLBACK_DRIVER_CHAMPIONSHIPS_BY_ID: Record<string, number> = {
   vettel: 4,
 };
 
+const TRUSTED_DRIVER_CHAMPIONSHIPS_BY_NAME: Record<string, number> = {
+  "lewis hamilton": 7,
+};
+
 const NUMBER_WORDS: Record<string, number> = {
   one: 1,
   two: 2,
@@ -289,6 +293,13 @@ function jolpicaDriverIdCandidates(driverName: string): string[] {
   return [...new Set([fullId, familyName].filter(Boolean))];
 }
 
+function trustedWorldChampionshipsForDriverName(driverName: string): number | null {
+  return (
+    TRUSTED_DRIVER_CHAMPIONSHIPS_BY_NAME[comparableName(cleanDriverName(driverName))] ??
+    null
+  );
+}
+
 function matchJolpicaDriver(
   driverName: string,
   drivers: JolpicaDriver[],
@@ -419,17 +430,18 @@ async function fetchWorldChampionshipsFromJolpica(driverName: string): Promise<n
   ]);
   const driver = matchJolpicaDriver(driverName, drivers);
   const driverIds = driver ? [driver.driverId] : jolpicaDriverIdCandidates(driverName);
+  const trustedTitles = trustedWorldChampionshipsForDriverName(driverName);
 
   for (const driverId of driverIds) {
     const titles =
       championships.get(driverId) ?? FALLBACK_DRIVER_CHAMPIONSHIPS_BY_ID[driverId];
 
     if (typeof titles === "number") {
-      return titles;
+      return trustedTitles !== null ? Math.max(titles, trustedTitles) : titles;
     }
   }
 
-  return driverIds.length > 0 ? 0 : null;
+  return trustedTitles ?? (driverIds.length > 0 ? 0 : null);
 }
 
 function searchTermFor(locale: Locale, driverName: string): string {
@@ -574,7 +586,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const driverName = url.searchParams.get("name")?.trim();
   const locale = normalizeLocale(url.searchParams.get("lang"));
-  const cacheKey = driverName ? `v11:${locale}:${cleanDriverName(driverName)}` : "";
+  const cacheKey = driverName ? `v12:${locale}:${cleanDriverName(driverName)}` : "";
   const cached = profileCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {
