@@ -15,6 +15,7 @@ import {
 import { apiMessage, intlLocale, t, type Locale } from "@/lib/i18n";
 import type {
   SeasonConstructorStanding,
+  SeasonConstructorPointsAvailability,
   SeasonDriverStanding,
   SeasonStandingsApiResponse,
   SeasonStandingsPayload,
@@ -179,10 +180,12 @@ function DriverRow({
 function ConstructorRow({
   row,
   maxPoints,
+  seasonMaxPoints,
   locale,
 }: {
   row: SeasonConstructorStanding;
   maxPoints: number;
+  seasonMaxPoints: number | null;
   locale: Locale;
 }) {
   const color = teamColor(row.name);
@@ -228,12 +231,70 @@ function ConstructorRow({
           <div className="mt-3">
             <div className="mb-1">
               <StandingMeta points={row.points} wins={row.wins} locale={locale} />
+              {seasonMaxPoints ? (
+                <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-neutral-500">
+                  {t(locale, "constructorPointsOfMax", {
+                    current: pointsLabel(row.points, locale),
+                    max: pointsLabel(seasonMaxPoints, locale),
+                  })}
+                </div>
+              ) : null}
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-white/10">
               <div
                 className="h-full rounded-full"
                 style={{ width: barWidth(row.points, maxPoints), backgroundColor: color }}
               />
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ConstructorPointsSummary({
+  points,
+  locale,
+}: {
+  points: SeasonConstructorPointsAvailability;
+  locale: Locale;
+}) {
+  return (
+    <article
+      className="rounded-lg border border-amber-300/20 bg-amber-300/[0.075] p-3"
+      data-constructor-points-available
+    >
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 flex-none place-items-center rounded-md border border-amber-200/25 bg-amber-200/12 text-amber-100">
+          <Flag className="h-4 w-4" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-black uppercase tracking-[0.14em] text-amber-100/85">
+            {t(locale, "constructorAvailablePointsTitle")}
+          </div>
+          <div className="mt-1 text-[0.68rem] font-semibold text-amber-50/58">
+            {t(locale, "constructorAvailablePointsBreakdown", {
+              races: points.raceCount,
+              sprints: points.sprintCount,
+            })}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-md border border-white/10 bg-neutral-950/35 px-2.5 py-2">
+              <div className="text-[0.66rem] font-bold uppercase tracking-[0.1em] text-neutral-400">
+                {t(locale, "constructorTotalPool")}
+              </div>
+              <div className="mt-1 text-base font-black text-white">
+                {pointsLabel(points.totalPointsPool, locale)}
+              </div>
+            </div>
+            <div className="rounded-md border border-white/10 bg-neutral-950/35 px-2.5 py-2">
+              <div className="text-[0.66rem] font-bold uppercase tracking-[0.1em] text-neutral-400">
+                {t(locale, "constructorMaxTeam")}
+              </div>
+              <div className="mt-1 text-base font-black text-white">
+                {pointsLabel(points.maxSingleConstructorPoints, locale)}
+              </div>
             </div>
           </div>
         </div>
@@ -323,10 +384,13 @@ export function SeasonStandings({ locale }: { locale: Locale }) {
     const constructors = standings?.constructors ?? [];
     const maxDriverPoints = Math.max(...drivers.map((row) => row.points), 0);
     const maxConstructorPoints = Math.max(...constructors.map((row) => row.points), 0);
+    const maxConstructorSeasonPoints =
+      standings?.constructorPointsAvailable?.maxSingleConstructorPoints ?? null;
 
     return {
       maxDriverPoints,
       maxConstructorPoints,
+      maxConstructorSeasonPoints,
       drivers: drivers.length,
       constructors: constructors.length,
     };
@@ -433,11 +497,20 @@ export function SeasonStandings({ locale }: { locale: Locale }) {
               icon="constructors"
               count={standings?.constructors.length ?? 0}
             >
+              {standings?.constructorPointsAvailable ? (
+                <ConstructorPointsSummary
+                  points={standings.constructorPointsAvailable}
+                  locale={locale}
+                />
+              ) : null}
               {(standings?.constructors ?? []).map((row) => (
                 <ConstructorRow
                   key={row.constructorId || row.name}
                   row={row}
-                  maxPoints={summary.maxConstructorPoints}
+                  maxPoints={
+                    summary.maxConstructorSeasonPoints ?? summary.maxConstructorPoints
+                  }
+                  seasonMaxPoints={summary.maxConstructorSeasonPoints}
                   locale={locale}
                 />
               ))}

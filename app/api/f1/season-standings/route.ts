@@ -4,9 +4,11 @@ import {
   fallbackProviderMessage,
   isFallbackSeason,
 } from "@/lib/f1FallbackData";
+import { constructorPointsAvailabilityFor } from "@/lib/f1Points";
 import { apiMessage, normalizeLocale } from "@/lib/i18n";
 import type {
   SeasonConstructorStanding,
+  SeasonConstructorPointsAvailability,
   SeasonDriverStanding,
   SeasonStandingsApiResponse,
   SeasonStandingsPayload,
@@ -22,6 +24,7 @@ interface CacheEntry {
 }
 
 const JOLPICA_BASE_URL = "https://api.jolpi.ca/ergast/f1";
+const SEASON_STANDINGS_CACHE_VERSION = "v2";
 
 const globalCache = globalThis as typeof globalThis & {
   __f1LiveTrackSeasonStandingsCache?: Map<string, CacheEntry>;
@@ -102,6 +105,28 @@ function standingsTable(payload: unknown): JsonRecord {
 
 function firstStandingsList(payload: unknown): JsonRecord {
   return asRecord(arrayValue(standingsTable(payload).StandingsLists)[0]);
+}
+
+function raceTable(payload: unknown): JsonRecord {
+  return asRecord(asRecord(asRecord(payload).MRData).RaceTable);
+}
+
+function parseConstructorPointsAvailability(
+  payload: unknown,
+): SeasonConstructorPointsAvailability | null {
+  const races = arrayValue(raceTable(payload).Races);
+
+  if (races.length === 0) {
+    return null;
+  }
+
+  const sprintCount = races.filter((rawRace) => {
+    const race = asRecord(rawRace);
+    const sprint = asRecord(race.Sprint);
+    return Boolean(stringValue(sprint, "date"));
+  }).length;
+
+  return constructorPointsAvailabilityFor(races.length, sprintCount);
 }
 
 function parseDriverStandings(payload: unknown): {
@@ -197,12 +222,15 @@ async function fetchSeasonStandingsPayload(
   const messages: string[] = [];
   const driverUrl = endpoint(`${seasonPath}/driverstandings/`);
   const constructorUrl = endpoint(`${seasonPath}/constructorstandings/`);
+  const racesUrl = endpoint(`${seasonPath}/races/`);
   driverUrl.searchParams.set("limit", "100");
   constructorUrl.searchParams.set("limit", "100");
+  racesUrl.searchParams.set("limit", "100");
 
-  const [driverResult, constructorResult] = await Promise.allSettled([
+  const [driverResult, constructorResult, racesResult] = await Promise.allSettled([
     fetchJson(driverUrl),
     fetchJson(constructorUrl),
+    fetchJson(racesUrl),
   ]);
 
   const drivers =
@@ -212,6 +240,10 @@ async function fetchSeasonStandingsPayload(
   const constructors =
     constructorResult.status === "fulfilled"
       ? parseConstructorStandings(constructorResult.value)
+      : null;
+  const constructorPointsAvailable =
+    racesResult.status === "fulfilled"
+      ? parseConstructorPointsAvailability(racesResult.value)
       : null;
 
   if (driverResult.status === "rejected") {
@@ -232,6 +264,16 @@ async function fetchSeasonStandingsPayload(
     );
   }
 
+  if (racesResult.status === "rejected") {
+    messages.push(
+      `Punti disponibili costruttori non calcolabili: ${
+        racesResult.reason instanceof Error ? racesResult.reason.message : "richiesta non riuscita"
+      }`,
+    );
+  } else if (!constructorPointsAvailable) {
+    messages.push("Calendario stagione non disponibile per calcolare i punti costruttori.");
+  }
+
   if (!drivers && !constructors) {
     throw new Error("Classifiche F1 non disponibili.");
   }
@@ -241,6 +283,7 @@ async function fetchSeasonStandingsPayload(
     round: drivers?.round ?? constructors?.round ?? 0,
     drivers: drivers?.rows ?? [],
     constructors: constructors?.rows ?? [],
+    constructorPointsAvailable,
     generatedAt,
     source: "jolpica",
   };
@@ -267,7 +310,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const seasonPath = parseSeason(url.searchParams.get("season"));
   const locale = normalizeLocale(url.searchParams.get("lang"));
-  const cacheKey = `season-standings:${seasonPath}`;
+  const cacheKey = `${SEASON_STANDINGS_CACHE_VERSION}:season-standings:${seasonPath}`;
   const cached = standingsCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {

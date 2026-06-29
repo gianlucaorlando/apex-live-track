@@ -5,6 +5,7 @@ import {
   raceName,
   type Locale,
 } from "@/lib/i18n";
+import { constructorPointsAvailabilityFor } from "@/lib/f1Points";
 import type {
   F1CalendarApiResponse,
   F1CalendarRace,
@@ -908,6 +909,7 @@ export function createFallbackSeasonStandingsPayload(
   locale: Locale,
 ): SeasonStandingsApiResponse {
   const generatedAt = new Date().toISOString();
+  const sprintCount = FALLBACK_RACES.filter((race) => race.sprint).length;
 
   return {
     data: {
@@ -915,6 +917,10 @@ export function createFallbackSeasonStandingsPayload(
       round: FALLBACK_ROUND,
       drivers: FALLBACK_DRIVERS,
       constructors: FALLBACK_CONSTRUCTORS,
+      constructorPointsAvailable: constructorPointsAvailabilityFor(
+        FALLBACK_RACES.length,
+        sprintCount,
+      ),
       generatedAt,
       source: "fallback",
     },

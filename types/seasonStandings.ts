@@ -26,11 +26,23 @@ export interface SeasonConstructorStanding {
   wikipediaUrl: string | null;
 }
 
+export interface SeasonConstructorPointsAvailability {
+  raceCount: number;
+  sprintCount: number;
+  grandPrixPointsPool: number;
+  sprintPointsPool: number;
+  totalPointsPool: number;
+  maxSingleConstructorPoints: number;
+  maxGrandPrixPointsPerConstructor: number;
+  maxSprintPointsPerConstructor: number;
+}
+
 export interface SeasonStandingsPayload {
   season: number;
   round: number;
   drivers: SeasonDriverStanding[];
   constructors: SeasonConstructorStanding[];
+  constructorPointsAvailable: SeasonConstructorPointsAvailability | null;
   generatedAt: string;
   source: "jolpica" | "fallback";
 }
