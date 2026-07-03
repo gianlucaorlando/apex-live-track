@@ -34,6 +34,9 @@ const LIVE_MOTION_LAG_MS = 6000;
 const REPLAY_MOTION_LAG_MS = 7000;
 const MOTION_FRAME_MS = 40;
 const STREAM_LOCATION_FLUSH_MS = 80;
+const CURRENT_TRACK_WINDOW_MS = 70 * 1000;
+const STREAM_LOCATION_MAX_AGE_MS = 5 * 60 * 1000;
+const STREAM_LOCATION_FUTURE_TOLERANCE_MS = 5000;
 
 class ClientApiError extends Error {
   status: number;
@@ -193,6 +196,56 @@ function mergeTrackPoints(existing: TrackPoint[], incoming: F1LocationPoint[]): 
       return aTime - bTime;
     })
     .slice(-18000);
+}
+
+function trackPointTime(point: TrackPoint): number {
+  if (!point.date) {
+    return 0;
+  }
+
+  const time = new Date(point.date).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function mergeCurrentTrackPoints(
+  existing: TrackPoint[],
+  incoming: F1LocationPoint[],
+): TrackPoint[] {
+  const merged = mergeTrackPoints(existing, incoming);
+  const latestTime = Math.max(...merged.map(trackPointTime), 0);
+
+  if (latestTime <= 0) {
+    return merged.slice(-1200);
+  }
+
+  const cutoff = latestTime - CURRENT_TRACK_WINDOW_MS;
+
+  return merged.filter((point) => trackPointTime(point) >= cutoff).slice(-2400);
+}
+
+function filterLiveStreamLocations(locations: F1LocationPoint[]): F1LocationPoint[] {
+  const locationTimes = locations.map((location) => new Date(location.date).getTime());
+  const latestTime = Math.max(
+    ...locationTimes.filter((time) => Number.isFinite(time)),
+    0,
+  );
+
+  if (latestTime <= 0) {
+    return [];
+  }
+
+  return locations.filter((location) => {
+    const time = new Date(location.date).getTime();
+
+    if (!Number.isFinite(time)) {
+      return false;
+    }
+
+    return (
+      time >= latestTime - STREAM_LOCATION_MAX_AGE_MS &&
+      time <= latestTime + STREAM_LOCATION_FUTURE_TOLERANCE_MS
+    );
+  });
 }
 
 function sortStandings(rows: LiveStandingRow[]): LiveStandingRow[] {
@@ -573,9 +626,15 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
 
       const locations = pendingLocations;
       pendingLocations = [];
-      setCurrentTrackPoints((current) => mergeTrackPoints(current, locations));
-      setTrackPoints((current) => mergeTrackPoints(current, locations));
-      setLastUpdated(locations.at(-1)?.date ?? new Date().toISOString());
+      const usableLocations = filterLiveStreamLocations(locations);
+
+      if (usableLocations.length === 0) {
+        return;
+      }
+
+      setCurrentTrackPoints((current) => mergeCurrentTrackPoints(current, usableLocations));
+      setTrackPoints((current) => mergeTrackPoints(current, usableLocations));
+      setLastUpdated(usableLocations.at(-1)?.date ?? new Date().toISOString());
       setPollingBackoff(false);
       setRateLimited(false);
     }

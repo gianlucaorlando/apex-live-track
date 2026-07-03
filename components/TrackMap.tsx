@@ -610,10 +610,6 @@ function coastPoint(
   };
 }
 
-function isCoastedPoint(point: TrackPoint): boolean {
-  return (point as MotionTrackPoint).coasted === true;
-}
-
 function getInterpolatedTrackPointByDriver(
   points: TrackPoint[],
   targetTimeMs: number,
@@ -714,45 +710,6 @@ function getInterpolatedTrackPointByDriver(
   return result;
 }
 
-function projectOntoTrack(
-  point: NormalizedTrackPoint,
-  polyline: NormalizedTrackPoint[],
-): NormalizedTrackPoint {
-  if (polyline.length < 2) {
-    return point;
-  }
-
-  let bestPoint: Pick<NormalizedTrackPoint, "x" | "y"> | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  for (let index = 1; index < polyline.length; index += 1) {
-    const start = polyline[index - 1];
-    const end = polyline[index];
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const lengthSquared = dx * dx + dy * dy;
-
-    if (lengthSquared <= 0) {
-      continue;
-    }
-
-    const progress = Math.min(
-      Math.max(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0),
-      1,
-    );
-    const x = start.x + dx * progress;
-    const y = start.y + dy * progress;
-    const distance = (point.x - x) ** 2 + (point.y - y) ** 2;
-
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestPoint = { x, y };
-    }
-  }
-
-  return bestPoint ? { ...point, ...bestPoint } : point;
-}
-
 function nearestSegmentAngle(
   point: NormalizedTrackPoint,
   polyline: NormalizedTrackPoint[],
@@ -819,13 +776,15 @@ export function TrackMap({
   );
   const baseData = useMemo(() => {
     const liveWindowPoints = [...currentTrackPoints, ...standingTrackPoints];
-    const mapPoints = [...trackPoints, ...liveWindowPoints];
-    const allPoints = finishLine ? [...mapPoints, finishLine] : mapPoints;
+    const geometryPoints = trackPoints.length >= 16 ? trackPoints : liveWindowPoints;
+    const mapPoints = [...geometryPoints, ...liveWindowPoints];
     const polylineRaw = buildTrackPolyline(
-      trackPoints.length > 0 ? trackPoints : liveWindowPoints,
+      geometryPoints.length > 0 ? geometryPoints : liveWindowPoints,
     );
+    const normalizerSource = polylineRaw.length >= 32 ? polylineRaw : mapPoints;
+    const allPoints = finishLine ? [...normalizerSource, finishLine] : normalizerSource;
     const normalizer = createTrackNormalizer(
-      [...allPoints, ...polylineRaw],
+      allPoints,
       SVG_WIDTH,
       SVG_HEIGHT,
       SVG_PADDING,
@@ -883,10 +842,6 @@ export function TrackMap({
           return null;
         }
 
-        const displayPoint = isCoastedPoint(markerPoint)
-          ? projectOntoTrack(normalized, baseData.polyline)
-          : normalized;
-
         return {
           driverNumber: row.driverNumber,
           acronym: row.acronym,
@@ -901,16 +856,15 @@ export function TrackMap({
           tyre: row.tyre,
           currentLap: row.currentLap,
           totalLaps: row.totalLaps,
-          x: displayPoint.x,
-          y: displayPoint.y,
-          rawX: displayPoint.rawX,
-          rawY: displayPoint.rawY,
+          x: normalized.x,
+          y: normalized.y,
+          rawX: normalized.rawX,
+          rawY: normalized.rawY,
         } satisfies NormalizedDriverPosition;
       })
       .filter((driver): driver is NormalizedDriverPosition => driver !== null);
   }, [
     baseData.normalizer,
-    baseData.polyline,
     currentTrackPoints,
     motionTimeMs,
     standingTrackPoints,
