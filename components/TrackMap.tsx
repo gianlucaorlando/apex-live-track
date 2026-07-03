@@ -14,7 +14,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
 import {
   circuitName,
@@ -67,6 +67,8 @@ const COAST_SAMPLE_MIN_MS = 1200;
 const COAST_SAMPLE_MAX_MS = 8000;
 const COAST_MAX_PROGRESS = 3.25;
 const MARKER_TRANSITION_MS = 90;
+const STABLE_TRACK_MIN_POINTS = 80;
+const STABLE_TRACK_REPLACE_RATIO = 1.25;
 
 function weatherNumber(value: number | null | undefined, digits = 0): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -511,6 +513,19 @@ function pointTime(point: TrackPoint): number {
   return Number.isNaN(time) ? 0 : time;
 }
 
+function trackShapeScore(points: TrackPoint[]): number {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const rangeX = Math.max(...xs) - Math.min(...xs);
+  const rangeY = Math.max(...ys) - Math.min(...ys);
+
+  return Math.hypot(rangeX, rangeY) + points.length * 0.05;
+}
+
 function getLatestTrackPointByDriver(points: TrackPoint[]): Map<number, TrackPoint> {
   const latest = new Map<number, TrackPoint>();
 
@@ -766,6 +781,11 @@ export function TrackMap({
   const [driverProfile, setDriverProfile] = useState<DriverProfile | null>(null);
   const [driverProfileLoading, setDriverProfileLoading] = useState(false);
   const [driverProfileError, setDriverProfileError] = useState<string | null>(null);
+  const stableTrackRef = useRef<{
+    meetingKey: number | null;
+    points: TrackPoint[];
+    score: number;
+  } | null>(null);
   const standingTrackPoints = useMemo(
     () =>
       standings
@@ -778,9 +798,30 @@ export function TrackMap({
     const liveWindowPoints = [...currentTrackPoints, ...standingTrackPoints];
     const geometryPoints = trackPoints.length >= 16 ? trackPoints : liveWindowPoints;
     const mapPoints = [...geometryPoints, ...liveWindowPoints];
-    const polylineRaw = buildTrackPolyline(
+    const candidatePolylineRaw = buildTrackPolyline(
       geometryPoints.length > 0 ? geometryPoints : liveWindowPoints,
     );
+    const meetingKey = meeting?.meetingKey ?? null;
+    const candidateScore = trackShapeScore(candidatePolylineRaw);
+    const stableTrack = stableTrackRef.current;
+
+    if (stableTrack?.meetingKey !== meetingKey) {
+      stableTrackRef.current = null;
+    }
+
+    if (
+      candidatePolylineRaw.length >= STABLE_TRACK_MIN_POINTS &&
+      (!stableTrackRef.current ||
+        candidateScore > stableTrackRef.current.score * STABLE_TRACK_REPLACE_RATIO)
+    ) {
+      stableTrackRef.current = {
+        meetingKey,
+        points: candidatePolylineRaw,
+        score: candidateScore,
+      };
+    }
+
+    const polylineRaw = stableTrackRef.current?.points ?? candidatePolylineRaw;
     const normalizerSource = polylineRaw.length >= 32 ? polylineRaw : mapPoints;
     const allPoints = finishLine ? [...normalizerSource, finishLine] : normalizerSource;
     const normalizer = createTrackNormalizer(
@@ -809,7 +850,7 @@ export function TrackMap({
       hasPoints: mapPoints.length > 0,
       normalizer,
     };
-  }, [currentTrackPoints, finishLine, standingTrackPoints, trackPoints]);
+  }, [currentTrackPoints, finishLine, meeting?.meetingKey, standingTrackPoints, trackPoints]);
 
   const drivers = useMemo(() => {
     const currentPointByDriver =
@@ -829,8 +870,8 @@ export function TrackMap({
       .map((row) => {
         const markerPoint =
           currentPointByDriver.get(row.driverNumber) ??
-          standingPointByDriver.get(row.driverNumber) ??
           livePointByDriver.get(row.driverNumber) ??
+          standingPointByDriver.get(row.driverNumber) ??
           null;
 
         if (!markerPoint) {
