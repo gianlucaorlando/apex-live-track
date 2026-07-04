@@ -78,6 +78,9 @@ const PATH_CLOSE_RATIO = 0.1;
 const PATH_CLOSE_MAX_PX = 90;
 const PATH_CONTINUITY_RAW_LIMIT_PX = 44;
 const PATH_CONTINUITY_WEIGHT = 0.04;
+const PATH_MAX_FORWARD_STEP_RATIO = 0.045;
+const PATH_MAX_FORWARD_STEP_MIN_PX = 44;
+const PATH_MAX_FORWARD_STEP_MAX_PX = 220;
 const POSITION_ORDER_GAP_PX = 26;
 const POSITION_ORDER_MAX_CORRECTION_RATIO = 0.08;
 const POSITION_ORDER_MIN_CORRECTION_PX = 96;
@@ -788,6 +791,76 @@ function pointAtTrackDistance(path: TrackPath, distance: number): NormalizedTrac
   };
 }
 
+function maxForwardStep(path: TrackPath): number {
+  return Math.min(
+    Math.max(
+      path.totalLength * PATH_MAX_FORWARD_STEP_RATIO,
+      PATH_MAX_FORWARD_STEP_MIN_PX,
+    ),
+    PATH_MAX_FORWARD_STEP_MAX_PX,
+  );
+}
+
+function projectedPointAtDistance(
+  projected: ProjectedTrackPoint,
+  path: TrackPath,
+  distance: number,
+): ProjectedTrackPoint {
+  const point = pointAtTrackDistance(path, distance);
+
+  if (!point) {
+    return projected;
+  }
+
+  return {
+    ...projected,
+    x: point.x,
+    y: point.y,
+    trackDistance: normalizePathDistance(distance, path),
+  };
+}
+
+function stabilizeProjectedPoint(
+  projected: ProjectedTrackPoint,
+  path: TrackPath,
+  previousDistance?: number,
+): ProjectedTrackPoint {
+  if (previousDistance === undefined || path.totalLength <= 0) {
+    return projected;
+  }
+
+  if (!path.closed) {
+    if (projected.trackDistance <= previousDistance) {
+      return projectedPointAtDistance(projected, path, previousDistance);
+    }
+
+    return projectedPointAtDistance(
+      projected,
+      path,
+      Math.min(projected.trackDistance, previousDistance + maxForwardStep(path)),
+    );
+  }
+
+  const forwardDelta = normalizePathDistance(
+    projected.trackDistance - previousDistance,
+    path,
+  );
+  const backwardDelta = normalizePathDistance(
+    previousDistance - projected.trackDistance,
+    path,
+  );
+
+  if (backwardDelta > 0 && backwardDelta < forwardDelta) {
+    return projectedPointAtDistance(projected, path, previousDistance);
+  }
+
+  return projectedPointAtDistance(
+    projected,
+    path,
+    previousDistance + Math.min(forwardDelta, maxForwardStep(path)),
+  );
+}
+
 function relativeTrackDistance(
   distance: number,
   zeroDistance: number,
@@ -816,6 +889,7 @@ function applyStandingOrderGuard(
   drivers: NormalizedDriverTrackPosition[],
   path: TrackPath,
   finishLineDistance: number | null,
+  previousDistances: Map<number, number>,
 ): NormalizedDriverTrackPosition[] {
   if (path.totalLength <= 0 || finishLineDistance === null) {
     return drivers;
@@ -862,6 +936,29 @@ function applyStandingOrderGuard(
         finishLineDistance,
         path,
       );
+      const previousDistance = previousDistances.get(driver.driverNumber);
+
+      if (previousDistance !== undefined) {
+        if (!path.closed && correctedDistance < previousDistance) {
+          previousProgressByLap.set(lap, relative);
+          continue;
+        }
+
+        const forwardFromPrevious = normalizePathDistance(
+          correctedDistance - previousDistance,
+          path,
+        );
+        const backwardFromPrevious = normalizePathDistance(
+          previousDistance - correctedDistance,
+          path,
+        );
+
+        if (backwardFromPrevious > 0 && backwardFromPrevious < forwardFromPrevious) {
+          previousProgressByLap.set(lap, relative);
+          continue;
+        }
+      }
+
       const point = pointAtTrackDistance(path, correctedDistance);
 
       if (point) {
@@ -1145,10 +1242,27 @@ export function TrackMap({
     score: number;
   } | null>(null);
   const driverPathRef = useRef<Map<number, number>>(new Map());
+  const previousMotionTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
     driverPathRef.current.clear();
+    previousMotionTimeRef.current = null;
   }, [meeting?.meetingKey]);
+
+  useEffect(() => {
+    if (motionTimeMs === null) {
+      previousMotionTimeRef.current = null;
+      return;
+    }
+
+    const previousMotionTime = previousMotionTimeRef.current;
+
+    if (previousMotionTime !== null && motionTimeMs + 1000 < previousMotionTime) {
+      driverPathRef.current.clear();
+    }
+
+    previousMotionTimeRef.current = motionTimeMs;
+  }, [motionTimeMs]);
 
   const standingTrackPoints = useMemo(
     () =>
@@ -1254,15 +1368,25 @@ export function TrackMap({
         if (!normalized) {
           return null;
         }
+        const previousDistance = driverPathRef.current.get(row.driverNumber);
         const projected =
           baseData.path.totalLength > 0
             ? projectPointToTrackPath(
                 normalized,
                 baseData.path,
-                driverPathRef.current.get(row.driverNumber),
+                previousDistance,
               )
             : null;
-        const displayPoint = projected ?? normalized;
+        const stabilized =
+          projected && baseData.path.totalLength > 0
+            ? stabilizeProjectedPoint(projected, baseData.path, previousDistance)
+            : null;
+        const displayPoint =
+          stabilized ?? (baseData.path.totalLength <= 0 ? normalized : null);
+
+        if (!displayPoint) {
+          return null;
+        }
 
         return {
           driverNumber: row.driverNumber,
@@ -1282,8 +1406,8 @@ export function TrackMap({
           y: displayPoint.y,
           rawX: normalized.rawX,
           rawY: normalized.rawY,
-          trackDistance: projected?.trackDistance ?? null,
-          projectionDistance: projected?.projectionDistance ?? null,
+          trackDistance: stabilized?.trackDistance ?? null,
+          projectionDistance: stabilized?.projectionDistance ?? null,
         } satisfies NormalizedDriverTrackPosition;
       })
       .filter((driver): driver is NormalizedDriverTrackPosition => driver !== null);
@@ -1292,6 +1416,7 @@ export function TrackMap({
       mappedDrivers,
       baseData.path,
       baseData.finishLineTrackDistance,
+      driverPathRef.current,
     );
   }, [
     baseData.normalizer,
