@@ -1540,6 +1540,7 @@ export function TrackMap({
         : getLatestTrackPointByDriver(livePointsByDriver);
 
     const mappedDrivers = standings
+      .filter((row) => row.status !== "OUT")
       .map((row) => {
         const markerPoint =
           currentPointByDriver.get(row.driverNumber) ??
