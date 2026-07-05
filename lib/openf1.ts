@@ -91,7 +91,11 @@ function tokenConfigured(): boolean {
 
 async function waitForOpenF1Slot(): Promise<void> {
   const now = Date.now();
-  const intervalMs = tokenConfigured() ? 180 : 380;
+  // Unauthenticated production deployments (e.g. no OPENF1_API_TOKEN configured on the
+  // host) hit OpenF1's public rate limit easily, especially right after a cold start when
+  // several routes fan out concurrent requests with no cache to fall back on. A more
+  // conservative interval trades a bit of freshness for far fewer 429s reaching the client.
+  const intervalMs = tokenConfigured() ? 180 : 550;
   const nextFetchAt = globalCache.__f1LiveTrackNextFetchAt ?? now;
   const backoffUntil = globalCache.__f1LiveTrackBackoffUntil ?? now;
   const waitMs = Math.max(0, nextFetchAt - now, backoffUntil - now);
@@ -104,7 +108,7 @@ async function waitForOpenF1Slot(): Promise<void> {
 }
 
 function rememberRateLimitBackoff(): void {
-  globalCache.__f1LiveTrackBackoffUntil = Date.now() + (tokenConfigured() ? 3500 : 9000);
+  globalCache.__f1LiveTrackBackoffUntil = Date.now() + (tokenConfigured() ? 3500 : 14000);
 }
 
 function cacheEntry<T>(value: T, ttl: number): CacheEntry<T> {
@@ -214,65 +218,89 @@ export async function fetchOpenF1Array<T>(
     Accept: "application/json",
   };
 
+  // A cold start (empty cache, e.g. right after the process spins back up on a host that
+  // sleeps when idle) has no stale value to fall back on, so a single 429 would otherwise
+  // reach the client as a hard failure. One short, bounded retry - well below the multi-
+  // second backoff used for unrelated calls - is usually enough to ride out a transient
+  // limit without making the caller wait noticeably longer.
+  const RATE_LIMIT_RETRY_DELAY_MS = 1200;
+
   const requestPromise = (async () => {
-    await waitForOpenF1Slot();
-    const accessToken = await getOpenF1AccessToken();
+    let attempt = 0;
 
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
-    }
+    for (;;) {
+      attempt += 1;
 
-    const response = await fetch(buildUrl(endpoint, params), {
-      cache: "no-store",
-      headers,
-      signal: controller.signal,
-    });
-    const payload: unknown = await response.json().catch(() => null);
-    const detail = detailMessage(payload);
-
-    if (!response.ok) {
-      if (isNoResultsMessage(detail)) {
-        if (ttl > 0) {
-          memoryCache.set(key, cacheEntry([], ttl));
-        }
-        return [];
+      // Only the first attempt waits for the shared slot/backoff: rememberRateLimitBackoff()
+      // below sets a multi-second backoff for *future*, unrelated calls, which would
+      // otherwise swallow the short retry delay we already apply ourselves right below.
+      if (attempt === 1) {
+        await waitForOpenF1Slot();
       }
 
-      if (response.status === 429) {
-        rememberRateLimitBackoff();
+      const accessToken = await getOpenF1AccessToken();
 
-        if (staleCached) {
-          memoryCache.set(key, cacheEntry(staleCached, Math.max(ttl, 4000)));
-          return staleCached;
-        }
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
       }
 
-      throw new OpenF1Error(
-        detail ?? `OpenF1 responded with ${response.status}`,
-        response.status,
-        response.status === 429,
-      );
-    }
+      const response = await fetch(buildUrl(endpoint, params), {
+        cache: "no-store",
+        headers,
+        signal: controller.signal,
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      const detail = detailMessage(payload);
 
-    if (!Array.isArray(payload)) {
-      if (isNoResultsMessage(detail)) {
-        if (ttl > 0) {
-          memoryCache.set(key, cacheEntry([], ttl));
+      if (!response.ok) {
+        if (isNoResultsMessage(detail)) {
+          if (ttl > 0) {
+            memoryCache.set(key, cacheEntry([], ttl));
+          }
+          return [];
         }
-        return [];
+
+        if (response.status === 429) {
+          rememberRateLimitBackoff();
+
+          if (staleCached) {
+            memoryCache.set(key, cacheEntry(staleCached, Math.max(ttl, 4000)));
+            return staleCached;
+          }
+
+          if (attempt === 1) {
+            await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
+            continue;
+          }
+        }
+
+        throw new OpenF1Error(
+          detail ?? `OpenF1 responded with ${response.status}`,
+          response.status,
+          response.status === 429,
+        );
       }
 
-      throw new OpenF1Error(
-        detail ?? "OpenF1 returned an unexpected payload",
-        502,
-      );
-    }
+      if (!Array.isArray(payload)) {
+        if (isNoResultsMessage(detail)) {
+          if (ttl > 0) {
+            memoryCache.set(key, cacheEntry([], ttl));
+          }
+          return [];
+        }
 
-    if (ttl > 0) {
-      memoryCache.set(key, cacheEntry(payload, ttl));
-    }
+        throw new OpenF1Error(
+          detail ?? "OpenF1 returned an unexpected payload",
+          502,
+        );
+      }
 
-    return payload as T[];
+      if (ttl > 0) {
+        memoryCache.set(key, cacheEntry(payload, ttl));
+      }
+
+      return payload as T[];
+    }
   })();
 
   inflightCache.set(key, requestPromise);

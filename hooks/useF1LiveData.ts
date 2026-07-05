@@ -382,6 +382,14 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [refreshNonce, setRefreshNonce] = useState(0);
   const replayStartedAt = useRef(Date.now());
   const hasUsableDataRef = useRef(false);
+  // Tracks automatic retries of the initial bootstrap load after a rate-limited failure
+  // with nothing usable on screen yet (see loadBase below) - without this, a 429 on first
+  // load (common right after a cold start with an empty server-side cache) would leave the
+  // app stuck on a static error banner until the user manually clicks refresh.
+  const bootstrapRetryRef = useRef<{ timeoutId: number | undefined; attempt: number }>({
+    timeoutId: undefined,
+    attempt: 0,
+  });
 
   const refresh = useCallback(() => {
     replayStartedAt.current = Date.now();
@@ -411,6 +419,11 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
+
+    if (bootstrapRetryRef.current.timeoutId !== undefined) {
+      window.clearTimeout(bootstrapRetryRef.current.timeoutId);
+      bootstrapRetryRef.current.timeoutId = undefined;
+    }
 
     async function loadBase() {
       setLoading(true);
@@ -443,6 +456,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
           return;
         }
 
+        bootstrapRetryRef.current.attempt = 0;
         setSession(sessionResponse.data);
         setMeeting(meetingResponse.data);
         setDrivers(driverResponse.data);
@@ -503,6 +517,21 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setTokenConfigured(clientError.meta?.tokenConfigured ?? false);
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
+
+        // A 429 with nothing on screen yet (typical right after a cold start) would
+        // otherwise leave the app stuck on this error banner until the user clicks
+        // refresh - retry on its own with a capped exponential backoff instead.
+        if (clientError.rateLimited) {
+          const attempt = bootstrapRetryRef.current.attempt;
+          const delay = Math.min(3000 * 2 ** attempt, 20000);
+          bootstrapRetryRef.current.attempt = attempt + 1;
+          bootstrapRetryRef.current.timeoutId = window.setTimeout(() => {
+            bootstrapRetryRef.current.timeoutId = undefined;
+            if (!disposed) {
+              refresh();
+            }
+          }, delay);
+        }
       } finally {
         if (!disposed) {
           setLoading(false);
@@ -515,6 +544,11 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     return () => {
       disposed = true;
       controller.abort();
+
+      if (bootstrapRetryRef.current.timeoutId !== undefined) {
+        window.clearTimeout(bootstrapRetryRef.current.timeoutId);
+        bootstrapRetryRef.current.timeoutId = undefined;
+      }
     };
   }, [demo, locale, refreshNonce]);
 
