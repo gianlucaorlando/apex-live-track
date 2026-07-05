@@ -30,6 +30,7 @@ import {
   dedupeNearPoints,
   locationToTrackPoint,
   normalizeTrackPoints,
+  type TrackNormalizer,
 } from "@/lib/track";
 import { tyreCompoundColor } from "@/lib/tyres";
 import type {
@@ -1284,6 +1285,19 @@ export function TrackMap({
   >(new Map());
   const markerAnimationTimersRef = useRef<Map<number, number>>(new Map());
 
+  // Refs read by the rAF loop — updated via useLayoutEffect whenever source data changes so
+  // the loop always sees fresh values without stale closures and without being part of any
+  // React dependency array.
+  const rafPathRef = useRef<TrackPath | null>(null);
+  const rafNormalizerRef = useRef<TrackNormalizer | null>(null);
+  const rafMaxProjectionRef = useRef<number>(MAX_PROJECTION_DISTANCE_MAX_PX);
+  const rafCurrentPtsRef = useRef<Map<number, TrackPoint[]>>(new Map());
+  const rafStandingPtsRef = useRef<Map<number, TrackPoint[]>>(new Map());
+  const rafLivePtsRef = useRef<Map<number, TrackPoint[]>>(new Map());
+  const rafActiveDriversRef = useRef<Set<number>>(new Set());
+  const rafMotionTimeMsRef = useRef<number | null>(null);
+  const rafLastRenderRef = useRef<number>(Date.now());
+
   useEffect(() => {
     driverPathRef.current.clear();
     previousMotionTimeRef.current = null;
@@ -1354,6 +1368,12 @@ export function TrackMap({
     previousMotionTimeRef.current = motionTimeMs;
   }, [motionTimeMs]);
 
+  // Keep rAF refs in sync with the latest React-computed values.
+  useLayoutEffect(() => {
+    rafMotionTimeMsRef.current = motionTimeMs;
+    rafLastRenderRef.current = Date.now();
+  }, [motionTimeMs]);
+
   const standingTrackPoints = useMemo(
     () =>
       standings
@@ -1378,6 +1398,10 @@ export function TrackMap({
     () => groupTrackPointsByDriver(trackPoints),
     [trackPoints],
   );
+
+  useLayoutEffect(() => { rafCurrentPtsRef.current = currentPointsByDriver; }, [currentPointsByDriver]);
+  useLayoutEffect(() => { rafStandingPtsRef.current = standingPointsByDriver; }, [standingPointsByDriver]);
+  useLayoutEffect(() => { rafLivePtsRef.current = livePointsByDriver; }, [livePointsByDriver]);
 
   const baseData = useMemo(() => {
     const liveWindowPoints = [...currentTrackPoints, ...standingTrackPoints];
@@ -1476,6 +1500,12 @@ export function TrackMap({
       normalizer,
     };
   }, [currentTrackPoints, finishLine, meeting?.meetingKey, standingTrackPoints, staticTrackPoints, trackPoints]);
+
+  useLayoutEffect(() => {
+    rafPathRef.current = baseData.path;
+    rafNormalizerRef.current = baseData.normalizer;
+    rafMaxProjectionRef.current = baseData.maxProjectionDistance;
+  }, [baseData.path, baseData.normalizer, baseData.maxProjectionDistance]);
 
   // Recomputed only when telemetry actually changes (see the dependency array below), not on
   // a ~40ms clock tick - `motionTimeMs` is read fresh from the closure for that purpose only,
@@ -1604,21 +1634,20 @@ export function TrackMap({
     driverPathRef.current = nextDistances;
   }, [drivers]);
 
-  // Owns every driver marker's `transform` imperatively (it is never part of the React style
-  // prop - see the marker JSX below) so a new target can be broken into a chain of short,
-  // curve-following transitions via plain setTimeout, without React re-rendering mid-chain and
-  // fighting the in-flight animation. useLayoutEffect (not useEffect) so a brand-new marker's
-  // first position is committed before paint, avoiding a flash at the SVG origin.
+  // Owns every driver marker's `transform` imperatively. New drivers are placed before paint
+  // (useLayoutEffect) so they never flash at the SVG origin. Ongoing position updates are
+  // driven by the rAF loop below which interpolates telemetry at ~60 fps, removing the need
+  // for CSS transitions or setTimeout waypoint chains between telemetry updates.
   useLayoutEffect(() => {
     const nodes = markerNodeRefs.current;
     const displayed = displayedMarkerRef.current;
-    const timers = markerAnimationTimersRef.current;
     const liveDriverNumbers = new Set(drivers.map((driver) => driver.driverNumber));
 
-    for (const [driverNumber, timerId] of timers) {
+    // Cancel any in-flight setTimeout timers for drivers that have retired/left
+    for (const [driverNumber, timerId] of markerAnimationTimersRef.current) {
       if (!liveDriverNumbers.has(driverNumber)) {
         window.clearTimeout(timerId);
-        timers.delete(driverNumber);
+        markerAnimationTimersRef.current.delete(driverNumber);
       }
     }
     for (const driverNumber of displayed.keys()) {
@@ -1627,67 +1656,91 @@ export function TrackMap({
       }
     }
 
+    // Keep the active-driver set in sync so the rAF loop knows whom to update
+    rafActiveDriversRef.current = liveDriverNumbers;
+
+    // Place brand-new drivers immediately before paint to avoid a flash at the SVG origin
     for (const driver of drivers) {
+      if (displayed.has(driver.driverNumber)) continue;
       const node = nodes.get(driver.driverNumber);
-      if (!node) {
-        continue;
-      }
-
-      const existingTimer = timers.get(driver.driverNumber);
-      if (existingTimer !== undefined) {
-        window.clearTimeout(existingTimer);
-        timers.delete(driver.driverNumber);
-      }
-
-      const previous = displayed.get(driver.driverNumber);
-      const target = {
-        x: driver.x,
-        y: driver.y,
-        trackDistance: driver.trackDistance,
-      };
-
-      if (!previous) {
-        node.style.transition = "none";
-        node.style.transform = `translate(${target.x}px, ${target.y}px)`;
-        displayed.set(driver.driverNumber, target);
-        continue;
-      }
-
-      const canFollowPath =
-        baseData.path.totalLength > 0 &&
-        previous.trackDistance !== null &&
-        target.trackDistance !== null;
-      const waypoints = canFollowPath
-        ? buildTrackWaypoints(
-            previous.trackDistance as number,
-            target.trackDistance as number,
-            baseData.path,
-            markerTransitionMs,
-            target,
-          )
-        : [{ x: target.x, y: target.y, durationMs: markerTransitionMs }];
-
-      const runStep = (stepIndex: number) => {
-        const step = waypoints[stepIndex];
-        if (!step) {
-          return;
-        }
-
-        node.style.transition = `transform ${step.durationMs}ms linear`;
-        node.style.transform = `translate(${step.x}px, ${step.y}px)`;
-
-        if (stepIndex + 1 < waypoints.length) {
-          const timerId = window.setTimeout(() => runStep(stepIndex + 1), step.durationMs);
-          timers.set(driver.driverNumber, timerId);
-        } else {
-          timers.delete(driver.driverNumber);
-        }
-      };
-
-      runStep(0);
-      displayed.set(driver.driverNumber, target);
+      if (!node) continue;
+      node.style.transform = `translate(${driver.x}px, ${driver.y}px)`;
+      displayed.set(driver.driverNumber, { x: driver.x, y: driver.y, trackDistance: driver.trackDistance });
     }
-  }, [drivers, baseData.path, markerTransitionMs]);
+  }, [drivers]);
+
+  // Smooth 60 fps position loop — reads from refs so it never needs to be restarted.
+  // Every frame: extrapolate the current motion time → interpolate telemetry → project the
+  // driver onto the track path → set the SVG transform directly, bypassing React and CSS
+  // transitions entirely. This eliminates the stall-then-snap artifact that arises when a
+  // CSS transition is interrupted by a new one before it completes.
+  useEffect(() => {
+    let rafId: number;
+
+    const tick = () => {
+      const path = rafPathRef.current;
+      const normalizer = rafNormalizerRef.current;
+      const motionTimeBase = rafMotionTimeMsRef.current;
+
+      if (path && normalizer && path.totalLength > 0 && motionTimeBase !== null) {
+        // Extrapolate forward from the last React-computed motion time so the loop stays
+        // accurate between renders without any additional prop or state.
+        const currentMotionTimeMs = motionTimeBase + (Date.now() - rafLastRenderRef.current);
+        const maxProjDist = rafMaxProjectionRef.current;
+        const hasCurrentPts = rafCurrentPtsRef.current.size > 0;
+
+        const currentPts = getInterpolatedTrackPointByDriver(rafCurrentPtsRef.current, currentMotionTimeMs);
+        const standingPts = hasCurrentPts
+          ? (new Map() as Map<number, TrackPoint>)
+          : getInterpolatedTrackPointByDriver(rafStandingPtsRef.current, currentMotionTimeMs);
+        const livePts = hasCurrentPts
+          ? (new Map() as Map<number, TrackPoint>)
+          : getInterpolatedTrackPointByDriver(rafLivePtsRef.current, currentMotionTimeMs);
+
+        for (const driverNumber of rafActiveDriversRef.current) {
+          const node = markerNodeRefs.current.get(driverNumber);
+          if (!node) continue;
+
+          const point = currentPts.get(driverNumber) ?? livePts.get(driverNumber) ?? standingPts.get(driverNumber);
+          if (!point) continue;
+
+          const normalized = normalizer.map(point);
+          if (!normalized) continue;
+
+          const previous = displayedMarkerRef.current.get(driverNumber);
+          const previousWrapped =
+            previous?.trackDistance != null
+              ? normalizePathDistance(previous.trackDistance, path)
+              : undefined;
+
+          const projected = projectPointToTrackPath(normalized, path, previousWrapped);
+          if (!projected) continue;
+
+          // Hold position when the telemetry point is too far off-path (e.g. pit lane gap)
+          if (projected.projectionDistance > maxProjDist && previous?.trackDistance != null) continue;
+
+          const trackDistance = accumulateTrackDistance(
+            projected.trackDistance,
+            path,
+            previous?.trackDistance ?? undefined,
+          );
+          const displayPoint = pointAtTrackDistance(path, trackDistance) ?? normalized;
+
+          node.style.transform = `translate(${displayPoint.x}px, ${displayPoint.y}px)`;
+          displayedMarkerRef.current.set(driverNumber, {
+            x: displayPoint.x,
+            y: displayPoint.y,
+            trackDistance,
+          });
+        }
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
 
   const renderedDrivers = useMemo(
     () =>
