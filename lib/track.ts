@@ -183,9 +183,12 @@ export function normalizeTrackPoints(
 }
 
 export function locationToTrackPoint(point: F1LocationPoint): TrackPoint {
+  const parsed = Date.parse(point.date);
+
   return {
     driverNumber: point.driverNumber,
     date: point.date,
+    timeMs: Number.isNaN(parsed) ? undefined : parsed,
     x: point.x,
     y: point.y,
     z: point.z,

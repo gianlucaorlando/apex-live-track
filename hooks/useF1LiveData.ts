@@ -32,7 +32,6 @@ interface ApiErrorPayload {
 
 const LIVE_MOTION_LAG_MS = 6000;
 const REPLAY_MOTION_LAG_MS = 7000;
-const MOTION_FRAME_MS = 40;
 const STREAM_LOCATION_FLUSH_MS = 80;
 const CURRENT_TRACK_WINDOW_MS = 70 * 1000;
 const STREAM_LOCATION_MAX_AGE_MS = 5 * 60 * 1000;
@@ -100,6 +99,33 @@ function replayMillisecondsFor(
 
 function replaySecondsFor(session: F1Session, demo: boolean, replayStartedAt: number): number {
   return Math.floor(replayMillisecondsFor(session, demo, replayStartedAt) / 1000);
+}
+
+// The "current" timestamp the track map should render, lagged behind live/replay time so a
+// real sample from *after* it is almost always already fetched (see position_lag_ms). This is
+// deliberately a plain derived value, not ticking state: TrackMap only needs a fresh read of
+// it when telemetry actually changes, not 25 times a second, so there is no rAF loop driving
+// it - it is simply recomputed on whichever render happens to need it.
+function computeMotionTimeMs(
+  session: F1Session | null,
+  demo: boolean,
+  loadedDemo: boolean | null,
+  replayStartedAt: number,
+): number | null {
+  if (!session || loadedDemo !== demo) {
+    return null;
+  }
+
+  if (session.isLive) {
+    return Date.now() - LIVE_MOTION_LAG_MS;
+  }
+
+  const start = new Date(session.dateStart).getTime();
+  if (!Number.isFinite(start)) {
+    return null;
+  }
+
+  return start + replayMillisecondsFor(session, demo, replayStartedAt) - REPLAY_MOTION_LAG_MS;
 }
 
 function buildParams(
@@ -190,15 +216,15 @@ function mergeTrackPoints(existing: TrackPoint[], incoming: F1LocationPoint[]): 
   }
 
   return [...byKey.values()]
-    .sort((a, b) => {
-      const aTime = a.date ? new Date(a.date).getTime() : 0;
-      const bTime = b.date ? new Date(b.date).getTime() : 0;
-      return aTime - bTime;
-    })
+    .sort((a, b) => trackPointTime(a) - trackPointTime(b))
     .slice(-18000);
 }
 
 function trackPointTime(point: TrackPoint): number {
+  if (typeof point.timeMs === "number" && Number.isFinite(point.timeMs)) {
+    return point.timeMs;
+  }
+
   if (!point.date) {
     return 0;
   }
@@ -352,7 +378,6 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
   const [partial, setPartial] = useState(false);
   const [messages, setMessages] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [motionTimeMs, setMotionTimeMs] = useState<number | null>(null);
   const [loadedDemo, setLoadedDemo] = useState<boolean | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const replayStartedAt = useRef(Date.now());
@@ -379,7 +404,6 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     setCurrentTrackPoints([]);
     setRaceControlMessages([]);
     setFinishLine(null);
-    setMotionTimeMs(null);
     setLastUpdated(null);
     setStreamActive(false);
   }, [demo]);
@@ -553,52 +577,6 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       controller.abort();
     };
   }, [demo, locale, loadedDemo, session, refreshNonce]);
-
-  useEffect(() => {
-    if (!session || loadedDemo !== demo) {
-      setMotionTimeMs(null);
-      return;
-    }
-
-    const activeSession = session;
-    const motionLagMs = activeSession.isLive ? LIVE_MOTION_LAG_MS : REPLAY_MOTION_LAG_MS;
-
-    function updateMotionTime() {
-      if (activeSession.isLive) {
-        setMotionTimeMs(Date.now() - motionLagMs);
-        return;
-      }
-
-      const start = new Date(activeSession.dateStart).getTime();
-      if (!Number.isFinite(start)) {
-        setMotionTimeMs(null);
-        return;
-      }
-
-      setMotionTimeMs(
-        start + replayMillisecondsFor(activeSession, demo, replayStartedAt.current) - motionLagMs,
-      );
-    }
-
-    updateMotionTime();
-    let lastMotionFrameAt = 0;
-    let animationFrame = 0;
-
-    function tick(now: number) {
-      if (now - lastMotionFrameAt >= MOTION_FRAME_MS) {
-        lastMotionFrameAt = now;
-        updateMotionTime();
-      }
-
-      animationFrame = window.requestAnimationFrame(tick);
-    }
-
-    animationFrame = window.requestAnimationFrame(tick);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-    };
-  }, [demo, loadedDemo, session]);
 
   useEffect(() => {
     if (!session || loadedDemo !== demo || demo || !session.isLive || !tokenConfigured) {
@@ -804,7 +782,20 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setRateLimited(false);
         setPollingBackoff(false);
         if (response.data.trackPoints.length > 0) {
-          setCurrentTrackPoints(response.data.trackPoints);
+          setCurrentTrackPoints((current) =>
+            mergeCurrentTrackPoints(
+              current,
+              response.data.trackPoints.map((point) => ({
+                date: point.date ?? response.meta.generatedAt,
+                sessionKey: activeSession.sessionKey,
+                meetingKey: activeSession.meetingKey,
+                driverNumber: point.driverNumber ?? 0,
+                x: point.x,
+                y: point.y,
+                z: point.z ?? null,
+              })),
+            ),
+          );
         }
         setTrackPoints((current) =>
           mergeTrackPoints(
@@ -954,6 +945,7 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
 
   const hasCurrentModeData = loadedDemo === demo;
   const currentLoading = loading || !hasCurrentModeData;
+  const motionTimeMs = computeMotionTimeMs(session, demo, loadedDemo, replayStartedAt.current);
 
   return {
     session: hasCurrentModeData ? session : null,

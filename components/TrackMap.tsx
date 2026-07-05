@@ -14,7 +14,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
 import {
   circuitName,
@@ -29,6 +29,7 @@ import {
   createTrackNormalizer,
   dedupeNearPoints,
   locationToTrackPoint,
+  normalizeTrackPoints,
 } from "@/lib/track";
 import { tyreCompoundColor } from "@/lib/tyres";
 import type {
@@ -60,13 +61,23 @@ interface TrackMapProps {
 const SVG_WIDTH = 1000;
 const SVG_HEIGHT = 680;
 const SVG_PADDING = 54;
-// Keeps avatars moving briefly when OpenF1 serves stale data during rate limits.
-const COAST_MAX_ELAPSED_MS = 24000;
-const COAST_DECAY_MS = 9000;
+// Keeps avatars moving briefly when OpenF1 serves stale data without inventing a corner exit.
+const COAST_MAX_ELAPSED_MS = 6000;
+const COAST_DECAY_MS = 2500;
 const COAST_SAMPLE_MIN_MS = 1200;
 const COAST_SAMPLE_MAX_MS = 8000;
-const COAST_MAX_PROGRESS = 3.25;
-const MARKER_TRANSITION_MS = 90;
+const COAST_MAX_PROGRESS = 0.9;
+// Marker transition duration is derived from the real gap between telemetry updates (see
+// markerTransitionMs) so it never stalls-then-snaps when updates arrive irregularly - a car
+// that hasn't reported for 5 real seconds glides there over 5 seconds, not an arbitrary one.
+const MARKER_TRANSITION_MIN_MS = 60;
+const MARKER_TRANSITION_MAX_MS = 6000;
+// A direct transform between two on-track points is a straight line, which cuts across the
+// infield whenever the two points are far apart along a curve. Large jumps are instead broken
+// into a short chain of intermediate on-path waypoints so the marker visibly follows the curve.
+const WAYPOINT_SPACING_PX = 70;
+const MAX_WAYPOINTS_PER_TRANSITION = 8;
+const MIN_WAYPOINT_STEP_MS = 45;
 const STABLE_TRACK_MIN_POINTS = 80;
 const STABLE_TRACK_REPLACE_RATIO = 1.25;
 const TRACK_LOOP_MIN_POINTS = 96;
@@ -78,13 +89,13 @@ const PATH_CLOSE_RATIO = 0.1;
 const PATH_CLOSE_MAX_PX = 90;
 const PATH_CONTINUITY_RAW_LIMIT_PX = 44;
 const PATH_CONTINUITY_WEIGHT = 0.04;
-const PATH_MAX_FORWARD_STEP_RATIO = 0.045;
-const PATH_MAX_FORWARD_STEP_MIN_PX = 44;
-const PATH_MAX_FORWARD_STEP_MAX_PX = 220;
 const POSITION_ORDER_GAP_PX = 26;
 const POSITION_ORDER_MAX_CORRECTION_RATIO = 0.08;
 const POSITION_ORDER_MIN_CORRECTION_PX = 96;
 const POSITION_ORDER_MAX_CORRECTION_PX = 260;
+const MAX_PROJECTION_DISTANCE_RATIO = 0.055;
+const MAX_PROJECTION_DISTANCE_MIN_PX = 52;
+const MAX_PROJECTION_DISTANCE_MAX_PX = 120;
 
 function weatherNumber(value: number | null | undefined, digits = 0): string {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -521,6 +532,10 @@ function avatarClipId(driverNumber: number): string {
 }
 
 function pointTime(point: TrackPoint): number {
+  if (typeof point.timeMs === "number" && Number.isFinite(point.timeMs)) {
+    return point.timeMs;
+  }
+
   if (!point.date) {
     return 0;
   }
@@ -576,6 +591,8 @@ function extractSingleTrackLoop(points: NormalizedTrackPoint[]): NormalizedTrack
   );
   const start = points[0];
   let travelled = 0;
+  let bestEndIndex = -1;
+  let bestTravelled = 0;
 
   for (let index = 1; index < points.length; index += 1) {
     travelled += normalizedDistance(points[index - 1], points[index]);
@@ -584,12 +601,18 @@ function extractSingleTrackLoop(points: NormalizedTrackPoint[]): NormalizedTrack
       continue;
     }
 
-    if (normalizedDistance(start, points[index]) <= returnTolerance) {
-      return points.slice(0, index + 1);
+    // A concatenated multi-lap trace can pass close to its own starting point more than
+    // once (e.g. a pit-lane entry near the start/finish straight) before actually
+    // completing a full lap. Keep scanning and take the largest valid loop found instead
+    // of stopping at the first candidate, so a coincidental early "near return" doesn't
+    // truncate the track and cut out a whole section of the circuit.
+    if (normalizedDistance(start, points[index]) <= returnTolerance && travelled > bestTravelled) {
+      bestEndIndex = index;
+      bestTravelled = travelled;
     }
   }
 
-  return points;
+  return bestEndIndex >= 0 ? points.slice(0, bestEndIndex + 1) : points;
 }
 
 type TrackPathSegment = {
@@ -791,74 +814,79 @@ function pointAtTrackDistance(path: TrackPath, distance: number): NormalizedTrac
   };
 }
 
-function maxForwardStep(path: TrackPath): number {
-  return Math.min(
-    Math.max(
-      path.totalLength * PATH_MAX_FORWARD_STEP_RATIO,
-      PATH_MAX_FORWARD_STEP_MIN_PX,
-    ),
-    PATH_MAX_FORWARD_STEP_MAX_PX,
-  );
-}
+type MarkerWaypoint = {
+  x: number;
+  y: number;
+  durationMs: number;
+};
 
-function projectedPointAtDistance(
-  projected: ProjectedTrackPoint,
+// Splits the move from `fromDistance` to `toDistance` (both cumulative, toDistance >=
+// fromDistance) into a short chain of on-path points so a CSS transition between consecutive
+// waypoints stays close to the track curve, instead of drawing one straight chord across the
+// infield when the two distances are far apart (e.g. after a multi-second telemetry gap).
+function buildTrackWaypoints(
+  fromDistance: number,
+  toDistance: number,
   path: TrackPath,
-  distance: number,
-): ProjectedTrackPoint {
-  const point = pointAtTrackDistance(path, distance);
+  totalDurationMs: number,
+  fallbackPoint: { x: number; y: number },
+): MarkerWaypoint[] {
+  const gap = toDistance - fromDistance;
 
-  if (!point) {
-    return projected;
+  if (path.totalLength <= 0 || gap <= 0) {
+    return [{ x: fallbackPoint.x, y: fallbackPoint.y, durationMs: totalDurationMs }];
   }
 
-  return {
-    ...projected,
-    x: point.x,
-    y: point.y,
-    trackDistance: normalizePathDistance(distance, path),
-  };
+  const steps = Math.min(
+    Math.max(Math.ceil(gap / WAYPOINT_SPACING_PX), 1),
+    MAX_WAYPOINTS_PER_TRANSITION,
+  );
+  const stepDurationMs = Math.max(totalDurationMs / steps, MIN_WAYPOINT_STEP_MS);
+  const waypoints: MarkerWaypoint[] = [];
+
+  for (let index = 1; index <= steps; index += 1) {
+    const distance = fromDistance + (gap * index) / steps;
+    const point = pointAtTrackDistance(path, distance);
+
+    if (point) {
+      waypoints.push({ x: point.x, y: point.y, durationMs: stepDurationMs });
+    }
+  }
+
+  return waypoints.length > 0
+    ? waypoints
+    : [{ x: fallbackPoint.x, y: fallbackPoint.y, durationMs: totalDurationMs }];
 }
 
-function stabilizeProjectedPoint(
-  projected: ProjectedTrackPoint,
+// `driverPathRef` stores a CUMULATIVE track distance per driver: unlike a value wrapped into
+// [0, totalLength), this one keeps growing lap after lap. That single property is what makes
+// the rest of the pipeline simple - a later sample always has a larger (or equal) distance
+// than an earlier one, so "how far did the car move" is a plain subtraction, no lap-aware
+// modulo arithmetic needed, and a lap-crossing update never looks like a huge jump backward.
+function accumulateTrackDistance(
+  candidateWrappedDistance: number,
   path: TrackPath,
-  previousDistance?: number,
-): ProjectedTrackPoint {
-  if (previousDistance === undefined || path.totalLength <= 0) {
-    return projected;
+  previousCumulativeDistance?: number,
+): number {
+  if (previousCumulativeDistance === undefined || path.totalLength <= 0) {
+    return candidateWrappedDistance;
   }
 
   if (!path.closed) {
-    if (projected.trackDistance <= previousDistance) {
-      return projectedPointAtDistance(projected, path, previousDistance);
-    }
-
-    return projectedPointAtDistance(
-      projected,
-      path,
-      Math.min(projected.trackDistance, previousDistance + maxForwardStep(path)),
-    );
+    // Cars never reverse on an open (not-yet-looped) path; treat backward GPS noise as
+    // "hold position" instead of animating the marker backwards.
+    return Math.max(candidateWrappedDistance, previousCumulativeDistance);
   }
 
-  const forwardDelta = normalizePathDistance(
-    projected.trackDistance - previousDistance,
-    path,
-  );
-  const backwardDelta = normalizePathDistance(
-    previousDistance - projected.trackDistance,
-    path,
-  );
+  const previousWrapped = normalizePathDistance(previousCumulativeDistance, path);
+  const forwardDelta = normalizePathDistance(candidateWrappedDistance - previousWrapped, path);
+  const backwardDelta = normalizePathDistance(previousWrapped - candidateWrappedDistance, path);
 
   if (backwardDelta > 0 && backwardDelta < forwardDelta) {
-    return projectedPointAtDistance(projected, path, previousDistance);
+    return previousCumulativeDistance;
   }
 
-  return projectedPointAtDistance(
-    projected,
-    path,
-    previousDistance + Math.min(forwardDelta, maxForwardStep(path)),
-  );
+  return previousCumulativeDistance + forwardDelta;
 }
 
 function relativeTrackDistance(
@@ -875,14 +903,6 @@ function relativeTrackDistance(
   }
 
   return normalizePathDistance(distance - zeroDistance, path);
-}
-
-function absoluteTrackDistance(
-  relativeDistance: number,
-  zeroDistance: number,
-  path: TrackPath,
-): number {
-  return normalizePathDistance(zeroDistance + relativeDistance, path);
 }
 
 function applyStandingOrderGuard(
@@ -931,11 +951,16 @@ function applyStandingOrderGuard(
       relative - (previousProgress - POSITION_ORDER_GAP_PX) <= maxCorrection
     ) {
       correctedRelative = Math.max(previousProgress - POSITION_ORDER_GAP_PX, 0);
-      const correctedDistance = absoluteTrackDistance(
-        correctedRelative,
-        finishLineDistance,
-        path,
-      );
+
+      // Apply the correction as a small delta on top of the driver's own cumulative
+      // distance, instead of rebuilding an absolute (wrapped-into-one-lap) value - this
+      // keeps the lap count embedded in `trackDistance` intact so the marker never appears
+      // to jump backward across most of the lap right after crossing the finish line.
+      let relativeDelta = correctedRelative - relative;
+      if (Math.abs(relativeDelta) > path.totalLength / 2) {
+        relativeDelta += relativeDelta > 0 ? -path.totalLength : path.totalLength;
+      }
+      const correctedDistance = trackDistance + relativeDelta;
       const previousDistance = previousDistances.get(driver.driverNumber);
 
       if (previousDistance !== undefined) {
@@ -981,75 +1006,114 @@ function applyStandingOrderGuard(
   return drivers.map((driver) => corrected.get(driver.driverNumber) ?? driver);
 }
 
-function getLatestTrackPointByDriver(points: TrackPoint[]): Map<number, TrackPoint> {
-  const latest = new Map<number, TrackPoint>();
+function groupTrackPointsByDriver(points: TrackPoint[]): Map<number, TrackPoint[]> {
+  const grouped = new Map<number, TrackPoint[]>();
 
   for (const point of points) {
     if (typeof point.driverNumber !== "number" || point.driverNumber <= 0) {
       continue;
     }
 
-    const current = latest.get(point.driverNumber);
-    if (!current || pointTime(point) >= pointTime(current)) {
-      latest.set(point.driverNumber, point);
+    const bucket = grouped.get(point.driverNumber);
+    if (bucket) {
+      bucket.push(point);
+    } else {
+      grouped.set(point.driverNumber, [point]);
+    }
+  }
+
+  return grouped;
+}
+
+// `points` is assumed sorted ascending by time (true for every grouped source array here,
+// since grouping preserves the relative order of the already time-sorted merged arrays).
+// Returns the first index whose time is strictly greater than `targetTimeMs`.
+function upperBoundIndex(points: TrackPoint[], targetTimeMs: number): number {
+  let low = 0;
+  let high = points.length;
+
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (pointTime(points[mid]) <= targetTimeMs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
+}
+
+// Returns the first index whose time is greater than or equal to `targetTimeMs`.
+function lowerBoundIndex(points: TrackPoint[], targetTimeMs: number): number {
+  let low = 0;
+  let high = points.length;
+
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (pointTime(points[mid]) < targetTimeMs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+
+  return low;
+}
+
+function getLatestTrackPointByDriver(
+  pointsByDriver: Map<number, TrackPoint[]>,
+): Map<number, TrackPoint> {
+  const latest = new Map<number, TrackPoint>();
+
+  for (const [driverNumber, points] of pointsByDriver) {
+    const lastPoint = points.at(-1);
+    if (lastPoint) {
+      latest.set(driverNumber, lastPoint);
     }
   }
 
   return latest;
 }
 
-type TimedTrackPoint = {
-  point: TrackPoint;
-  time: number;
-};
-
 type MotionTrackPoint = TrackPoint & {
   coasted?: boolean;
 };
 
-type TrackPointBucket = {
-  before: TimedTrackPoint | null;
-  after: TimedTrackPoint | null;
-  reference: TimedTrackPoint | null;
-  nearestPrevious: TimedTrackPoint | null;
-};
-
 function interpolatePoint(
   driverNumber: number,
-  before: TimedTrackPoint,
-  after: TimedTrackPoint,
+  before: TrackPoint,
+  after: TrackPoint,
+  beforeTime: number,
+  afterTime: number,
   targetTimeMs: number,
 ): TrackPoint {
-  const progress = (targetTimeMs - before.time) / (after.time - before.time);
+  const progress = (targetTimeMs - beforeTime) / (afterTime - beforeTime);
   const clampedProgress = Math.min(Math.max(progress, 0), 1);
 
   return {
     driverNumber,
     date: new Date(targetTimeMs).toISOString(),
-    x: before.point.x + (after.point.x - before.point.x) * clampedProgress,
-    y: before.point.y + (after.point.y - before.point.y) * clampedProgress,
+    timeMs: targetTimeMs,
+    x: before.x + (after.x - before.x) * clampedProgress,
+    y: before.y + (after.y - before.y) * clampedProgress,
     z:
-      before.point.z !== undefined &&
-      before.point.z !== null &&
-      after.point.z !== undefined &&
-      after.point.z !== null
-        ? before.point.z + (after.point.z - before.point.z) * clampedProgress
-        : before.point.z,
+      before.z !== undefined && before.z !== null && after.z !== undefined && after.z !== null
+        ? before.z + (after.z - before.z) * clampedProgress
+        : before.z,
   };
 }
 
 function coastPoint(
   driverNumber: number,
-  latest: TimedTrackPoint,
-  reference: TimedTrackPoint | null,
+  latest: TrackPoint,
+  latestTime: number,
+  reference: TrackPoint,
+  referenceTime: number,
   targetTimeMs: number,
 ): MotionTrackPoint | null {
-  if (!reference) {
-    return null;
-  }
-
-  const sampleDuration = latest.time - reference.time;
-  const elapsed = targetTimeMs - latest.time;
+  const sampleDuration = latestTime - referenceTime;
+  const elapsed = targetTimeMs - latestTime;
 
   if (sampleDuration <= 0 || elapsed <= 0) {
     return null;
@@ -1059,16 +1123,17 @@ function coastPoint(
   const easedElapsed =
     COAST_MAX_ELAPSED_MS * (1 - Math.exp(-cappedElapsed / COAST_DECAY_MS));
   const progress = Math.min(easedElapsed / sampleDuration, COAST_MAX_PROGRESS);
-  const xVelocity = latest.point.x - reference.point.x;
-  const yVelocity = latest.point.y - reference.point.y;
-  const referenceZ = reference.point.z;
-  const latestZ = latest.point.z;
+  const xVelocity = latest.x - reference.x;
+  const yVelocity = latest.y - reference.y;
+  const referenceZ = reference.z;
+  const latestZ = latest.z;
 
   return {
     driverNumber,
     date: new Date(targetTimeMs).toISOString(),
-    x: latest.point.x + xVelocity * progress,
-    y: latest.point.y + yVelocity * progress,
+    timeMs: targetTimeMs,
+    x: latest.x + xVelocity * progress,
+    y: latest.y + yVelocity * progress,
     coasted: true,
     z:
       typeof latestZ === "number" &&
@@ -1081,89 +1146,48 @@ function coastPoint(
 }
 
 function getInterpolatedTrackPointByDriver(
-  points: TrackPoint[],
+  pointsByDriver: Map<number, TrackPoint[]>,
   targetTimeMs: number,
 ): Map<number, TrackPoint> {
-  const byDriver = new Map<number, TrackPointBucket>();
-
-  for (const point of points) {
-    if (typeof point.driverNumber !== "number" || point.driverNumber <= 0) {
-      continue;
-    }
-
-    const time = pointTime(point);
-    if (time <= 0) {
-      continue;
-    }
-
-    const sample = { point, time };
-    const bucket =
-      byDriver.get(point.driverNumber) ??
-      {
-        before: null,
-        after: null,
-        reference: null,
-        nearestPrevious: null,
-      };
-
-    if (time <= targetTimeMs && (!bucket.before || time >= bucket.before.time)) {
-      bucket.before = sample;
-    }
-
-    if (time >= targetTimeMs && (!bucket.after || time < bucket.after.time)) {
-      bucket.after = sample;
-    }
-
-    byDriver.set(point.driverNumber, bucket);
-  }
-
-  for (const point of points) {
-    if (typeof point.driverNumber !== "number" || point.driverNumber <= 0) {
-      continue;
-    }
-
-    const time = pointTime(point);
-    const bucket = byDriver.get(point.driverNumber);
-
-    if (!bucket?.before || time <= 0) {
-      continue;
-    }
-
-    const sampleAge = bucket.before.time - time;
-    if (sampleAge <= 0) {
-      continue;
-    }
-
-    const sample = { point, time };
-    if (!bucket.nearestPrevious || time > bucket.nearestPrevious.time) {
-      bucket.nearestPrevious = sample;
-    }
-
-    if (
-      sampleAge >= COAST_SAMPLE_MIN_MS &&
-      sampleAge <= COAST_SAMPLE_MAX_MS &&
-      (!bucket.reference || sampleAge > bucket.before.time - bucket.reference.time)
-    ) {
-      bucket.reference = sample;
-    }
-  }
-
   const result = new Map<number, TrackPoint>();
 
-  for (const [driverNumber, bucket] of byDriver) {
-    const { before, after } = bucket;
-    if (before && after && after.time !== before.time) {
-      result.set(driverNumber, interpolatePoint(driverNumber, before, after, targetTimeMs));
+  for (const [driverNumber, points] of pointsByDriver) {
+    if (points.length === 0) {
       continue;
     }
 
-    if (before && targetTimeMs > before.time) {
-      const coastedPoint = coastPoint(
+    const splitIndex = upperBoundIndex(points, targetTimeMs);
+    const before = splitIndex > 0 ? points[splitIndex - 1] : null;
+    const after = splitIndex < points.length ? points[splitIndex] : null;
+    const beforeTime = before ? pointTime(before) : 0;
+    const afterTime = after ? pointTime(after) : 0;
+
+    if (before && after && beforeTime > 0 && afterTime > 0 && afterTime !== beforeTime) {
+      result.set(
         driverNumber,
-        before,
-        bucket.reference ?? bucket.nearestPrevious,
-        targetTimeMs,
+        interpolatePoint(driverNumber, before, after, beforeTime, afterTime, targetTimeMs),
       );
+      continue;
+    }
+
+    if (before && beforeTime > 0 && targetTimeMs > beforeTime) {
+      const referenceIndex = lowerBoundIndex(points, beforeTime - COAST_SAMPLE_MAX_MS);
+      const referenceCandidate =
+        referenceIndex < splitIndex - 1 ? points[referenceIndex] : null;
+      const referenceCandidateTime = referenceCandidate ? pointTime(referenceCandidate) : 0;
+      const reference =
+        referenceCandidate &&
+        referenceCandidateTime > 0 &&
+        beforeTime - referenceCandidateTime >= COAST_SAMPLE_MIN_MS
+          ? referenceCandidate
+          : splitIndex >= 2
+            ? points[splitIndex - 2]
+            : null;
+      const referenceTime = reference ? pointTime(reference) : 0;
+
+      const coastedPoint = reference
+        ? coastPoint(driverNumber, before, beforeTime, reference, referenceTime, targetTimeMs)
+        : null;
 
       if (coastedPoint) {
         result.set(driverNumber, coastedPoint);
@@ -1171,7 +1195,7 @@ function getInterpolatedTrackPointByDriver(
       }
     }
 
-    const fallback = before?.point ?? after?.point;
+    const fallback = before ?? after;
     if (fallback) {
       result.set(driverNumber, fallback);
     }
@@ -1240,14 +1264,46 @@ export function TrackMap({
     meetingKey: number | null;
     points: TrackPoint[];
     score: number;
+    closed: boolean;
   } | null>(null);
   const driverPathRef = useRef<Map<number, number>>(new Map());
   const previousMotionTimeRef = useRef<number | null>(null);
+  // Timestamp of the motion tick used for the *previous* `drivers` recompute (distinct from
+  // previousMotionTimeRef, which only tracks backward-jump detection). The gap against this
+  // is the real elapsed time used to size the transition duration of the next update.
+  const lastDriversMotionTimeRef = useRef<number | null>(null);
+  // Imperative animation state for driver markers: DOM node per driver, the position/track
+  // distance currently displayed (as opposed to the latest computed target), and any
+  // in-flight waypoint-stepping timer. Positioning is driven entirely outside of React's
+  // render cycle (see the layout effect below) so a multi-second real-world gap can be
+  // animated as a chain of short, curve-following steps instead of one straight-line jump.
+  const markerNodeRefs = useRef<Map<number, SVGGElement>>(new Map());
+  const displayedMarkerRef = useRef<
+    Map<number, { x: number; y: number; trackDistance: number | null }>
+  >(new Map());
+  const markerAnimationTimersRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     driverPathRef.current.clear();
     previousMotionTimeRef.current = null;
+    lastDriversMotionTimeRef.current = null;
+    displayedMarkerRef.current.clear();
+
+    for (const timerId of markerAnimationTimersRef.current.values()) {
+      window.clearTimeout(timerId);
+    }
+    markerAnimationTimersRef.current.clear();
   }, [meeting?.meetingKey]);
+
+  useEffect(() => {
+    const timers = markerAnimationTimersRef.current;
+
+    return () => {
+      for (const timerId of timers.values()) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (motionTimeMs === null) {
@@ -1272,6 +1328,23 @@ export function TrackMap({
         .map(locationToTrackPoint),
     [standings],
   );
+
+  // Grouping by driver is the expensive part of resolving a position at the current motion
+  // time; hoisting it into its own memo means it only reruns when new telemetry actually
+  // arrives, instead of on every ~40ms motion tick.
+  const currentPointsByDriver = useMemo(
+    () => groupTrackPointsByDriver(currentTrackPoints),
+    [currentTrackPoints],
+  );
+  const standingPointsByDriver = useMemo(
+    () => groupTrackPointsByDriver(standingTrackPoints),
+    [standingTrackPoints],
+  );
+  const livePointsByDriver = useMemo(
+    () => groupTrackPointsByDriver(trackPoints),
+    [trackPoints],
+  );
+
   const baseData = useMemo(() => {
     const liveWindowPoints = [...currentTrackPoints, ...standingTrackPoints];
     const geometryPoints = trackPoints.length >= 16 ? trackPoints : liveWindowPoints;
@@ -1287,15 +1360,32 @@ export function TrackMap({
       stableTrackRef.current = null;
     }
 
+    // A driver's raw trace over the session can concatenate multiple partial laps (out-lap,
+    // pit stop, in-lap...), so the very first candidate that clears STABLE_TRACK_MIN_POINTS
+    // may not actually form a closed loop yet - just a big arc. Check for that explicitly:
+    // a candidate that closes the loop always wins over one that doesn't, no matter the
+    // score, otherwise an early partial arc can get stuck forever (missing a chunk of the
+    // circuit) since a merely-more-complete-but-still-partial arc rarely clears the
+    // STABLE_TRACK_REPLACE_RATIO bar.
+    const candidateClosed =
+      candidatePolylineRaw.length >= TRACK_LOOP_MIN_POINTS &&
+      buildTrackPath(
+        extractSingleTrackLoop(
+          normalizeTrackPoints(candidatePolylineRaw, SVG_WIDTH, SVG_HEIGHT, SVG_PADDING),
+        ),
+      ).closed;
+
     if (
       candidatePolylineRaw.length >= STABLE_TRACK_MIN_POINTS &&
       (!stableTrackRef.current ||
+        (candidateClosed && !stableTrackRef.current.closed) ||
         candidateScore > stableTrackRef.current.score * STABLE_TRACK_REPLACE_RATIO)
     ) {
       stableTrackRef.current = {
         meetingKey,
         points: candidatePolylineRaw,
         score: candidateScore,
+        closed: candidateClosed,
       };
     }
 
@@ -1313,6 +1403,13 @@ export function TrackMap({
       .filter((point): point is NonNullable<typeof point> => point !== null);
     const polyline = extractSingleTrackLoop(normalizedPolyline);
     const path = buildTrackPath(polyline);
+    const maxProjectionDistance = Math.min(
+      Math.max(
+        normalizedBoundsDiagonal(polyline) * MAX_PROJECTION_DISTANCE_RATIO,
+        MAX_PROJECTION_DISTANCE_MIN_PX,
+      ),
+      MAX_PROJECTION_DISTANCE_MAX_PX,
+    );
     const normalizedFinishLine = finishLine ? normalizer.map(finishLine) : null;
     const finishLineProjection =
       normalizedFinishLine && path.totalLength > 0
@@ -1323,6 +1420,7 @@ export function TrackMap({
       polyline,
       path,
       finishLineTrackDistance: finishLineProjection?.trackDistance ?? null,
+      maxProjectionDistance,
       finishLine:
         finishLine && normalizedFinishLine
           ? {
@@ -1338,19 +1436,37 @@ export function TrackMap({
     };
   }, [currentTrackPoints, finishLine, meeting?.meetingKey, standingTrackPoints, trackPoints]);
 
-  const drivers = useMemo(() => {
+  // Recomputed only when telemetry actually changes (see the dependency array below), not on
+  // a ~40ms clock tick - `motionTimeMs` is read fresh from the closure for that purpose only,
+  // deliberately left out of the dependency list so an unrelated re-render (hover, selection)
+  // doesn't re-run this and reset the "time since last update" bookkeeping below.
+  const { list: drivers, transitionMs: markerTransitionMs } = useMemo(() => {
+    const currentMotionTimeMs = motionTimeMs;
+    const previousDriversMotionTimeMs = lastDriversMotionTimeRef.current;
+    const rawElapsedMs =
+      currentMotionTimeMs !== null &&
+      previousDriversMotionTimeMs !== null &&
+      currentMotionTimeMs > previousDriversMotionTimeMs
+        ? currentMotionTimeMs - previousDriversMotionTimeMs
+        : MARKER_TRANSITION_MIN_MS;
+    const transitionMs = Math.min(
+      Math.max(rawElapsedMs, MARKER_TRANSITION_MIN_MS),
+      MARKER_TRANSITION_MAX_MS,
+    );
+    lastDriversMotionTimeRef.current = currentMotionTimeMs;
+
     const currentPointByDriver =
-      motionTimeMs && currentTrackPoints.length > 0
-        ? getInterpolatedTrackPointByDriver(currentTrackPoints, motionTimeMs)
-        : getLatestTrackPointByDriver(currentTrackPoints);
+      currentMotionTimeMs && currentPointsByDriver.size > 0
+        ? getInterpolatedTrackPointByDriver(currentPointsByDriver, currentMotionTimeMs)
+        : getLatestTrackPointByDriver(currentPointsByDriver);
     const standingPointByDriver =
-      motionTimeMs && standingTrackPoints.length > 0
-        ? getInterpolatedTrackPointByDriver(standingTrackPoints, motionTimeMs)
-        : getLatestTrackPointByDriver(standingTrackPoints);
+      currentMotionTimeMs && standingPointsByDriver.size > 0
+        ? getInterpolatedTrackPointByDriver(standingPointsByDriver, currentMotionTimeMs)
+        : getLatestTrackPointByDriver(standingPointsByDriver);
     const livePointByDriver =
-      motionTimeMs && trackPoints.length > 0
-        ? getInterpolatedTrackPointByDriver(trackPoints, motionTimeMs)
-        : getLatestTrackPointByDriver(trackPoints);
+      currentMotionTimeMs && livePointsByDriver.size > 0
+        ? getInterpolatedTrackPointByDriver(livePointsByDriver, currentMotionTimeMs)
+        : getLatestTrackPointByDriver(livePointsByDriver);
 
     const mappedDrivers = standings
       .map((row) => {
@@ -1368,25 +1484,29 @@ export function TrackMap({
         if (!normalized) {
           return null;
         }
+
         const previousDistance = driverPathRef.current.get(row.driverNumber);
+        const previousWrappedDistance =
+          previousDistance !== undefined && baseData.path.totalLength > 0
+            ? normalizePathDistance(previousDistance, baseData.path)
+            : undefined;
         const projected =
           baseData.path.totalLength > 0
-            ? projectPointToTrackPath(
-                normalized,
-                baseData.path,
-                previousDistance,
-              )
+            ? projectPointToTrackPath(normalized, baseData.path, previousWrappedDistance)
             : null;
-        const stabilized =
+        const projectedTooFar =
+          projected !== null &&
+          projected.projectionDistance > baseData.maxProjectionDistance;
+        const trackDistance =
           projected && baseData.path.totalLength > 0
-            ? stabilizeProjectedPoint(projected, baseData.path, previousDistance)
+            ? projectedTooFar && previousDistance !== undefined
+              ? previousDistance
+              : accumulateTrackDistance(projected.trackDistance, baseData.path, previousDistance)
             : null;
         const displayPoint =
-          stabilized ?? (baseData.path.totalLength <= 0 ? normalized : null);
-
-        if (!displayPoint) {
-          return null;
-        }
+          trackDistance !== null
+            ? (pointAtTrackDistance(baseData.path, trackDistance) ?? normalized)
+            : normalized;
 
         return {
           driverNumber: row.driverNumber,
@@ -1406,27 +1526,29 @@ export function TrackMap({
           y: displayPoint.y,
           rawX: normalized.rawX,
           rawY: normalized.rawY,
-          trackDistance: stabilized?.trackDistance ?? null,
-          projectionDistance: stabilized?.projectionDistance ?? null,
+          trackDistance,
+          projectionDistance: projected?.projectionDistance ?? null,
         } satisfies NormalizedDriverTrackPosition;
       })
       .filter((driver): driver is NormalizedDriverTrackPosition => driver !== null);
 
-    return applyStandingOrderGuard(
+    const list = applyStandingOrderGuard(
       mappedDrivers,
       baseData.path,
       baseData.finishLineTrackDistance,
       driverPathRef.current,
     );
+
+    return { list, transitionMs };
   }, [
     baseData.normalizer,
     baseData.path,
     baseData.finishLineTrackDistance,
-    currentTrackPoints,
-    motionTimeMs,
-    standingTrackPoints,
+    baseData.maxProjectionDistance,
+    currentPointsByDriver,
+    livePointsByDriver,
+    standingPointsByDriver,
     standings,
-    trackPoints,
   ]);
 
   useEffect(() => {
@@ -1440,6 +1562,91 @@ export function TrackMap({
 
     driverPathRef.current = nextDistances;
   }, [drivers]);
+
+  // Owns every driver marker's `transform` imperatively (it is never part of the React style
+  // prop - see the marker JSX below) so a new target can be broken into a chain of short,
+  // curve-following transitions via plain setTimeout, without React re-rendering mid-chain and
+  // fighting the in-flight animation. useLayoutEffect (not useEffect) so a brand-new marker's
+  // first position is committed before paint, avoiding a flash at the SVG origin.
+  useLayoutEffect(() => {
+    const nodes = markerNodeRefs.current;
+    const displayed = displayedMarkerRef.current;
+    const timers = markerAnimationTimersRef.current;
+    const liveDriverNumbers = new Set(drivers.map((driver) => driver.driverNumber));
+
+    for (const [driverNumber, timerId] of timers) {
+      if (!liveDriverNumbers.has(driverNumber)) {
+        window.clearTimeout(timerId);
+        timers.delete(driverNumber);
+      }
+    }
+    for (const driverNumber of displayed.keys()) {
+      if (!liveDriverNumbers.has(driverNumber)) {
+        displayed.delete(driverNumber);
+      }
+    }
+
+    for (const driver of drivers) {
+      const node = nodes.get(driver.driverNumber);
+      if (!node) {
+        continue;
+      }
+
+      const existingTimer = timers.get(driver.driverNumber);
+      if (existingTimer !== undefined) {
+        window.clearTimeout(existingTimer);
+        timers.delete(driver.driverNumber);
+      }
+
+      const previous = displayed.get(driver.driverNumber);
+      const target = {
+        x: driver.x,
+        y: driver.y,
+        trackDistance: driver.trackDistance,
+      };
+
+      if (!previous) {
+        node.style.transition = "none";
+        node.style.transform = `translate(${target.x}px, ${target.y}px)`;
+        displayed.set(driver.driverNumber, target);
+        continue;
+      }
+
+      const canFollowPath =
+        baseData.path.totalLength > 0 &&
+        previous.trackDistance !== null &&
+        target.trackDistance !== null;
+      const waypoints = canFollowPath
+        ? buildTrackWaypoints(
+            previous.trackDistance as number,
+            target.trackDistance as number,
+            baseData.path,
+            markerTransitionMs,
+            target,
+          )
+        : [{ x: target.x, y: target.y, durationMs: markerTransitionMs }];
+
+      const runStep = (stepIndex: number) => {
+        const step = waypoints[stepIndex];
+        if (!step) {
+          return;
+        }
+
+        node.style.transition = `transform ${step.durationMs}ms linear`;
+        node.style.transform = `translate(${step.x}px, ${step.y}px)`;
+
+        if (stepIndex + 1 < waypoints.length) {
+          const timerId = window.setTimeout(() => runStep(stepIndex + 1), step.durationMs);
+          timers.set(driver.driverNumber, timerId);
+        } else {
+          timers.delete(driver.driverNumber);
+        }
+      };
+
+      runStep(0);
+      displayed.set(driver.driverNumber, target);
+    }
+  }, [drivers, baseData.path, markerTransitionMs]);
 
   const renderedDrivers = useMemo(
     () =>
@@ -1463,7 +1670,15 @@ export function TrackMap({
     [drivers, hoveredDriver, selectedDriverNumber],
   );
 
-  const polylinePoints = baseData.polyline
+  // A `<polyline>` never closes itself, so when the reconstructed lap is a closed loop
+  // (baseData.path.closed), the drawn line needs its first point repeated at the end -
+  // otherwise the gap between the last and first sampled point (typically right on the
+  // start/finish straight) renders as a visible break in the track.
+  const polylineRenderPoints =
+    baseData.path.closed && baseData.polyline.length > 0
+      ? [...baseData.polyline, baseData.polyline[0]]
+      : baseData.polyline;
+  const polylinePoints = polylineRenderPoints
     .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
   const hasTrack = baseData.polyline.length >= 3;
@@ -1719,6 +1934,13 @@ export function TrackMap({
           return (
             <g
               key={driver.driverNumber}
+              ref={(node) => {
+                if (node) {
+                  markerNodeRefs.current.set(driver.driverNumber, node);
+                } else {
+                  markerNodeRefs.current.delete(driver.driverNumber);
+                }
+              }}
               onMouseEnter={() => onHoverDriver(driver.driverNumber)}
               onMouseLeave={() => onHoverDriver(null)}
               onClick={(event) => {
@@ -1728,12 +1950,14 @@ export function TrackMap({
                 );
               }}
               style={{
-                transform: `translate(${driver.x}px, ${driver.y}px)`,
-                transition: `transform ${MARKER_TRANSITION_MS}ms linear, opacity 160ms ease`,
+                // `transform` is intentionally never set here - it is owned imperatively by
+                // the layout effect above so a multi-waypoint animation can run without React
+                // re-rendering over it mid-chain.
                 transformBox: "fill-box",
                 transformOrigin: "center",
                 willChange: "transform",
                 opacity: hoveredDriver && !active ? 0.48 : 1,
+                transition: "opacity 160ms ease",
                 cursor: "pointer",
               }}
               filter={active ? "url(#marker-glow)" : undefined}

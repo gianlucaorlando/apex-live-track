@@ -161,6 +161,8 @@ export interface LiveStandingRow {
 export interface TrackPoint {
   driverNumber?: number;
   date?: string;
+  /** Cached epoch milliseconds for `date`, avoids re-parsing the ISO string on every hot-path lookup. */
+  timeMs?: number;
   x: number;
   y: number;
   z?: number | null;
