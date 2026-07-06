@@ -1262,6 +1262,7 @@ export function TrackMap({
   const [driverProfileLoading, setDriverProfileLoading] = useState(false);
   const [driverProfileError, setDriverProfileError] = useState<string | null>(null);
   const [staticTrackPoints, setStaticTrackPoints] = useState<TrackPoint[] | null>(null);
+  const [staticFinishLine, setStaticFinishLine] = useState<FinishLinePoint | null>(null);
   const stableTrackRef = useRef<{
     meetingKey: number | null;
     points: TrackPoint[];
@@ -1324,28 +1325,54 @@ export function TrackMap({
   // scripts/generate_tracks.py and live at public/tracks/{circuitKey}.json.
   // They use the same OpenF1 coordinate system as live telemetry, so driver
   // markers overlay the static path with zero extra calibration.
+  // The JSON may also include a `finishLine` field with the pre-computed
+  // start/finish line position, which is more reliable than the runtime
+  // inference from lap-start timestamps.
   useEffect(() => {
     const circuitKey = meeting?.circuitKey;
     if (!circuitKey) {
       setStaticTrackPoints(null);
+      setStaticFinishLine(null);
       return;
     }
 
     let cancelled = false;
     fetch(`/tracks/${circuitKey}.json`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { points?: Array<{ x: number; y: number }> } | null) => {
-        if (cancelled) return;
-        if (data?.points && data.points.length > 0) {
-          setStaticTrackPoints(
-            data.points.map((p) => ({ driverNumber: 0, date: "", x: p.x, y: p.y })),
-          );
-        } else {
-          setStaticTrackPoints(null);
-        }
-      })
+      .then(
+        (
+          data: {
+            points?: Array<{ x: number; y: number }>;
+            finishLine?: { x: number; y: number };
+          } | null,
+        ) => {
+          if (cancelled) return;
+          if (data?.points && data.points.length > 0) {
+            setStaticTrackPoints(
+              data.points.map((p) => ({ driverNumber: 0, date: "", x: p.x, y: p.y })),
+            );
+          } else {
+            setStaticTrackPoints(null);
+          }
+          const fl = data?.finishLine;
+          if (fl && typeof fl.x === "number" && typeof fl.y === "number") {
+            setStaticFinishLine({
+              x: fl.x,
+              y: fl.y,
+              source: "lap-start",
+              confidence: "high",
+              lapNumber: null,
+            });
+          } else {
+            setStaticFinishLine(null);
+          }
+        },
+      )
       .catch(() => {
-        if (!cancelled) setStaticTrackPoints(null);
+        if (!cancelled) {
+          setStaticTrackPoints(null);
+          setStaticFinishLine(null);
+        }
       });
 
     return () => {
@@ -1455,8 +1482,13 @@ export function TrackMap({
       staticTrackPoints && staticTrackPoints.length >= 50
         ? staticTrackPoints
         : stableTrackRef.current?.points ?? candidatePolylineRaw;
+    // Prefer the pre-computed finish line from the static JSON (same session
+    // as the track geometry, highest accuracy) over the runtime-inferred one.
+    const effectiveFinishLine = staticFinishLine ?? finishLine;
     const normalizerSource = polylineRaw.length >= 32 ? polylineRaw : mapPoints;
-    const allPoints = finishLine ? [...normalizerSource, finishLine] : normalizerSource;
+    const allPoints = effectiveFinishLine
+      ? [...normalizerSource, effectiveFinishLine]
+      : normalizerSource;
     const normalizer = createTrackNormalizer(
       allPoints,
       SVG_WIDTH,
@@ -1475,11 +1507,17 @@ export function TrackMap({
       ),
       MAX_PROJECTION_DISTANCE_MAX_PX,
     );
-    const normalizedFinishLine = finishLine ? normalizer.map(finishLine) : null;
+    const normalizedFinishLine = effectiveFinishLine ? normalizer.map(effectiveFinishLine) : null;
     const finishLineProjection =
       normalizedFinishLine && path.totalLength > 0
         ? projectPointToTrackPath(normalizedFinishLine, path)
         : null;
+    // Snap the finish-line marker to the nearest point on the track path so it
+    // sits visually on the polyline even when the raw telemetry has GPS jitter.
+    const finishLineOnPath =
+      finishLineProjection
+        ? (pointAtTrackDistance(path, finishLineProjection.trackDistance) ?? normalizedFinishLine)
+        : normalizedFinishLine;
 
     return {
       polyline,
@@ -1487,19 +1525,21 @@ export function TrackMap({
       finishLineTrackDistance: finishLineProjection?.trackDistance ?? null,
       maxProjectionDistance,
       finishLine:
-        finishLine && normalizedFinishLine
+        effectiveFinishLine && normalizedFinishLine && finishLineOnPath
           ? {
               ...normalizedFinishLine,
-              angle: nearestSegmentAngle(normalizedFinishLine, polyline),
-              confidence: finishLine.confidence,
-              lapNumber: finishLine.lapNumber,
-              source: finishLine.source,
+              x: finishLineOnPath.x,
+              y: finishLineOnPath.y,
+              angle: nearestSegmentAngle(finishLineOnPath, polyline),
+              confidence: effectiveFinishLine.confidence,
+              lapNumber: effectiveFinishLine.lapNumber,
+              source: effectiveFinishLine.source,
             }
           : null,
       hasPoints: mapPoints.length > 0 || (staticTrackPoints !== null && staticTrackPoints.length > 0),
       normalizer,
     };
-  }, [currentTrackPoints, finishLine, meeting?.meetingKey, standingTrackPoints, staticTrackPoints, trackPoints]);
+  }, [currentTrackPoints, finishLine, meeting?.meetingKey, standingTrackPoints, staticFinishLine, staticTrackPoints, trackPoints]);
 
   useLayoutEffect(() => {
     rafPathRef.current = baseData.path;

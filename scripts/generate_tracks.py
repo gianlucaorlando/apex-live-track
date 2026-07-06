@@ -5,7 +5,7 @@ Uses the OpenF1 API directly — same coordinate system as the live telemetry,
 so driver markers overlay the static SVG with zero calibration.
 
 Output: public/tracks/{circuitKey}.json
-  { circuitKey, circuitShortName, year, points: [{x, y}] }
+  { circuitKey, circuitShortName, year, points: [{x, y}], finishLine?: {x, y} }
 
 Usage:
     pip install requests
@@ -19,6 +19,7 @@ import os
 import time
 import warnings
 from pathlib import Path
+from datetime import datetime as _dt
 from typing import Optional
 
 # Suppress urllib3 SSL warning on macOS with LibreSSL
@@ -107,8 +108,9 @@ def coverage_score(points):
 
 def extract_single_loop(points):
     """
-    Mirror of extractSingleTrackLoop in TrackMap.tsx.
-    Finds the first full loop in a multi-lap trace and returns only those points.
+    Finds the FIRST complete circuit loop in a multi-lap trace and returns only
+    those points.  OpenF1 coordinates are in decimetres (1 unit = 0.1 m), so
+    all tolerances here are in dm.
     """
     if len(points) < 30:
         return points
@@ -117,13 +119,16 @@ def extract_single_loop(points):
     ys = [p["y"] for p in points]
     diag = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
 
+    # Must travel at least 1.75× the bounding-box diagonal before looking for a
+    # return — prevents false positives from the pit lane or chicane detours.
     min_travel = diag * 1.75
-    return_tol = min(max(diag * 0.08, 34), 78)
+    # Mirrors extractSingleTrackLoop in TrackMap.tsx: 8% of bounding-box diagonal,
+    # clamped to 50–200 m (in dm units: 500–2000).  The wider tolerance makes the
+    # detection reliable even at circuits with poor GPS coverage (e.g. urban venues).
+    return_tol = min(max(diag * 0.08, 500.0), 2000.0)
 
     start = points[0]
     travelled = 0.0
-    best_end = -1
-    best_travelled = 0.0
 
     for i in range(1, len(points)):
         dx = points[i]["x"] - points[i - 1]["x"]
@@ -134,18 +139,19 @@ def extract_single_loop(points):
             continue
 
         dist_to_start = math.hypot(points[i]["x"] - start["x"], points[i]["y"] - start["y"])
-        if dist_to_start <= return_tol and travelled > best_travelled:
-            best_end = i
-            best_travelled = travelled
+        if dist_to_start <= return_tol:
+            return points[:i + 1]  # Stop at the first valid loop closure
 
-    return points[: best_end + 1] if best_end >= 0 else points
+    return points  # No loop detected — return everything
 
 
 def build_polyline(raw_locs):
     """
     Mirror of buildTrackPolyline in track.ts:
     group by driver, sort by date, pick the driver with best track coverage,
-    then deduplicate nearby points.
+    then extract a single loop and deduplicate nearby points.
+
+    Returns (polyline_points, best_driver_number).
     """
     by_driver: dict[int, list[dict]] = {}
     for loc in raw_locs:
@@ -157,18 +163,83 @@ def build_polyline(raw_locs):
         by_driver.setdefault(dn, []).append({"x": x, "y": y, "date": loc.get("date", "")})
 
     if not by_driver:
-        return []
+        return [], None
 
     for pts in by_driver.values():
         pts.sort(key=lambda p: p["date"])
 
     candidates = [pts for pts in by_driver.values() if len(pts) >= 8]
     if not candidates:
-        return []
+        return [], None
 
     best = max(candidates, key=coverage_score)
+    best_dn = next(dn for dn, pts in by_driver.items() if pts is best)
     single_loop = extract_single_loop(best)
-    return dedupe(single_loop)
+    return dedupe(single_loop), best_dn
+
+
+def compute_finish_line(laps: list, all_locs: list, preferred_driver: Optional[int]) -> Optional[dict]:
+    """
+    Infer the start/finish line position from lap-start timestamps.
+
+    Uses the location data already fetched for track construction (all_locs) so
+    no extra API calls are needed.  Returns {"x": ..., "y": ...} in OpenF1
+    coordinates (decimetres), or None if the position cannot be determined.
+    """
+    # Prefer laps 2+ to avoid the race-start grid position for lap 1
+    candidates = [
+        lap for lap in laps
+        if lap.get("date_start") and (lap.get("lap_number") or 0) >= 2
+    ]
+    if not candidates:
+        candidates = [lap for lap in laps if lap.get("date_start")]
+    if not candidates:
+        return None
+
+    # Sort: preferred driver first, then ascending lap number
+    candidates.sort(
+        key=lambda l: (
+            0 if l.get("driver_number") == preferred_driver else 1,
+            l.get("lap_number") or 0,
+        )
+    )
+
+    for lap in candidates[:6]:
+        try:
+            target_ms = _dt.fromisoformat(
+                lap["date_start"].replace("Z", "+00:00")
+            ).timestamp() * 1000
+        except Exception:
+            continue
+
+        driver_num = lap.get("driver_number")
+        best_loc, best_delta, best_same = None, float("inf"), False
+
+        for loc in all_locs:
+            x, y = loc.get("x") or 0, loc.get("y") or 0
+            if not is_valid(x, y):
+                continue
+            try:
+                loc_ms = _dt.fromisoformat(
+                    (loc.get("date") or "").replace("Z", "+00:00")
+                ).timestamp() * 1000
+            except Exception:
+                continue
+            delta = abs(loc_ms - target_ms)
+            if delta > 6000:
+                continue
+            same = loc.get("driver_number") == driver_num
+            if (
+                not best_loc
+                or (same and not best_same)
+                or (same == best_same and delta < best_delta)
+            ):
+                best_loc, best_delta, best_same = loc, delta, same
+
+        if best_loc:
+            return {"x": round(best_loc["x"], 1), "y": round(best_loc["y"], 1)}
+
+    return None
 
 
 def main():
@@ -242,18 +313,29 @@ def main():
                 all_locs.extend(locs)
                 print(f"   Driver {dn}: {len(locs)} raw points")
 
-            poly = build_polyline(all_locs)
+            poly, best_dn = build_polyline(all_locs)
 
             if len(poly) < 50:
                 print(f"   ✗ Only {len(poly)} polyline points — skipping")
                 continue
 
-            data = {
+            # Fetch lap-start times to locate the start/finish line
+            time.sleep(2)
+            laps = get("laps", session_key=sk)
+            finish_line = compute_finish_line(laps or [], all_locs, best_dn)
+            if finish_line:
+                print(f"   Finish line: x={finish_line['x']}, y={finish_line['y']}")
+            else:
+                print("   Finish line: not found in lap data")
+
+            data: dict = {
                 "circuitKey": ck,
                 "circuitShortName": name,
                 "year": year,
                 "points": [{"x": round(p["x"], 1), "y": round(p["y"], 1)} for p in poly],
             }
+            if finish_line:
+                data["finishLine"] = finish_line
 
             out_file.write_text(json.dumps(data, separators=(",", ":")))
             print(f"   ✓ {len(poly)} points saved → {out_file}\n")

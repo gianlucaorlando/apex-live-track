@@ -148,9 +148,13 @@ export function Dashboard({ initialDemo }: DashboardProps) {
     }
 
     loadWeather();
+    // Re-fetch periodically so the displayed conditions stay current throughout
+    // a long session (matches the server-side 10-minute cache TTL).
+    const intervalId = setInterval(loadWeather, 10 * 60 * 1000);
 
     return () => {
       controller.abort();
+      clearInterval(intervalId);
     };
   }, [liveData.meeting, locale]);
 
