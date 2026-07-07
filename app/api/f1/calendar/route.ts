@@ -320,6 +320,43 @@ function parsePodiumPosition(payload: unknown): PodiumEntry[] {
     }));
 }
 
+async function fetchAllResultsPayload(season: number): Promise<unknown> {
+  const PAGE_SIZE = 100;
+  const racesByRound = new Map<string, JsonRecord>();
+  let total = Infinity;
+
+  for (let offset = 0; offset < total; offset += PAGE_SIZE) {
+    const url = endpoint(`${season}/results/`);
+    url.searchParams.set("limit", String(PAGE_SIZE));
+    url.searchParams.set("offset", String(offset));
+
+    const payload = await fetchJson(url);
+    const mr = asRecord(asRecord(payload).MRData);
+    total = numberValue(mr, "total") ?? offset + 1;
+
+    for (const rawRace of arrayValue(asRecord(mr.RaceTable).Races)) {
+      const race = asRecord(rawRace);
+      const key = String(numberValue(race, "round") ?? "");
+      const existing = racesByRound.get(key);
+
+      if (existing) {
+        existing.Results = [...arrayValue(existing.Results), ...arrayValue(race.Results)];
+      } else {
+        racesByRound.set(key, { ...race });
+      }
+    }
+  }
+
+  const pages = Math.ceil(total / PAGE_SIZE);
+  console.log(`[calendar] Results fetch: total=${total} results, ${pages} page(s), ${racesByRound.size} rounds`);
+
+  const allRaces = [...racesByRound.values()].sort(
+    (a, b) => (numberValue(asRecord(a), "round") ?? 0) - (numberValue(asRecord(b), "round") ?? 0),
+  );
+
+  return { MRData: { RaceTable: { Races: allRaces }, season: String(season) } };
+}
+
 async function fetchPodiumByRound(
   season: number,
   messages: string[],
@@ -328,10 +365,7 @@ async function fetchPodiumByRound(
   const lapsByRound = new Map<number, number>();
 
   try {
-    const url = endpoint(`${season}/results/`);
-    url.searchParams.set("limit", "2000");
-    console.log(`[calendar] Fetching results: ${url.toString()}`);
-    const payload = await fetchJson(url);
+    const payload = await fetchAllResultsPayload(season);
 
     const roundsWithResults = new Set<number>();
 
