@@ -330,7 +330,10 @@ async function fetchPodiumByRound(
   try {
     const url = endpoint(`${season}/results/`);
     url.searchParams.set("limit", "2000");
+    console.log(`[calendar] Fetching results: ${url.toString()}`);
     const payload = await fetchJson(url);
+
+    const roundsWithResults = new Set<number>();
 
     for (const [round, laps] of parseLapsByRound(payload)) {
       lapsByRound.set(round, laps);
@@ -340,10 +343,14 @@ async function fetchPodiumByRound(
       const existing = podiumByRound.get(driver.round) ?? [];
       const { round, ...podiumDriver } = driver;
       podiumByRound.set(round, [...existing, podiumDriver]);
+      roundsWithResults.add(round);
     }
+
+    console.log(`[calendar] Rounds with podium data: ${[...roundsWithResults].sort((a, b) => a - b).join(", ") || "none"}`);
   } catch (error) {
     const reason =
       error instanceof Error ? error.message : "Ricerca podio non riuscita";
+    console.error(`[calendar] Primary results fetch failed: ${reason}`);
 
     if (/429/.test(reason)) {
       return { lapsByRound, podiumByRound };
@@ -366,7 +373,9 @@ async function fetchPodiumByRound(
           podiumByRound.set(round, [...existing, podiumDriver]);
         }
       }
-    } catch {
+    } catch (fallbackError) {
+      const fallbackReason = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      console.error(`[calendar] Fallback results fetch also failed: ${fallbackReason}`);
       messages.push(`Podio non disponibile: ${reason}`);
     }
   }
@@ -439,6 +448,15 @@ async function fetchCalendarPayload(
     messages.push("Calendario non disponibile per la stagione richiesta.");
   }
 
+  const pastWithoutPodium = races.filter(
+    (r) => r.status === "past" && r.podium.length === 0,
+  );
+  if (pastWithoutPodium.length > 0) {
+    console.warn(
+      `[calendar] ${pastWithoutPodium.length} past race(s) with no podium data: rounds ${pastWithoutPodium.map((r) => r.round).join(", ")}`,
+    );
+  }
+
   const payload: F1CalendarPayload = {
     season,
     races,
@@ -464,8 +482,12 @@ export async function GET(request: Request) {
   const cached = calendarCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {
+    const ttlSec = Math.round((cached.expiresAt - Date.now()) / 1000);
+    console.log(`[calendar] Cache hit — key=${cacheKey} ttl=${ttlSec}s`);
     return NextResponse.json(cached.value);
   }
+
+  console.log(`[calendar] Cache miss — fetching key=${cacheKey}`);
 
   try {
     const payload = await fetchCalendarPayload(seasonPath, locale);
