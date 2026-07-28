@@ -709,7 +709,13 @@ function projectPointToTrackPath(
     return null;
   }
 
-  const candidates: ProjectedTrackPoint[] = [];
+  // Two allocation-free passes over the segments. This runs a few dozen times per animation
+  // frame, so materialising a candidate object per segment (there are hundreds) would churn
+  // the heap hard enough to cause the very stutter this view is trying to avoid.
+  let nearestX = 0;
+  let nearestY = 0;
+  let nearestDistance = 0;
+  let nearestProjection = Number.POSITIVE_INFINITY;
 
   for (const segment of path.segments) {
     const dx = segment.end.x - segment.start.x;
@@ -722,8 +728,7 @@ function projectPointToTrackPath(
 
     const progress = Math.min(
       Math.max(
-        ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) /
-          lengthSquared,
+        ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared,
         0,
       ),
       1,
@@ -732,56 +737,96 @@ function projectPointToTrackPath(
     const y = segment.start.y + dy * progress;
     const projectionDistance = Math.hypot(point.x - x, point.y - y);
 
-    candidates.push({
-      ...point,
-      x,
-      y,
-      trackDistance: normalizePathDistance(
+    if (projectionDistance < nearestProjection) {
+      nearestProjection = projectionDistance;
+      nearestX = x;
+      nearestY = y;
+      nearestDistance = normalizePathDistance(
         segment.startDistance + segment.length * progress,
         path,
-      ),
-      projectionDistance,
-    });
+      );
+    }
   }
 
-  if (candidates.length === 0) {
+  if (!Number.isFinite(nearestProjection)) {
     return null;
   }
 
-  const nearest = candidates.reduce((best, candidate) =>
-    candidate.projectionDistance < best.projectionDistance ? candidate : best,
-  );
-
-  if (previousDistance === undefined || path.totalLength <= 0) {
-    return nearest;
+  if (previousDistance === undefined) {
+    return {
+      ...point,
+      x: nearestX,
+      y: nearestY,
+      trackDistance: nearestDistance,
+      projectionDistance: nearestProjection,
+    };
   }
 
+  // Second pass: among the segments that are almost as close as the nearest one, prefer the
+  // one that best preserves continuity with where this driver already was. That is what
+  // stops a marker hopping between two stretches of track that happen to run side by side.
   const rawLimit = Math.max(
-    nearest.projectionDistance + PATH_CONTINUITY_RAW_LIMIT_PX,
+    nearestProjection + PATH_CONTINUITY_RAW_LIMIT_PX,
     PATH_CONTINUITY_RAW_LIMIT_PX,
   );
-  const plausible = candidates.filter(
-    (candidate) => candidate.projectionDistance <= rawLimit,
-  );
+  let bestX = nearestX;
+  let bestY = nearestY;
+  let bestDistance = nearestDistance;
+  let bestProjection = nearestProjection;
+  let bestScore =
+    nearestProjection ** 2 +
+    circularPathDelta(nearestDistance, previousDistance, path.totalLength) ** 2 *
+      PATH_CONTINUITY_WEIGHT;
 
-  return plausible.reduce((best, candidate) => {
-    const bestContinuity = circularPathDelta(
-      best.trackDistance,
-      previousDistance,
-      path.totalLength,
-    );
-    const candidateContinuity = circularPathDelta(
-      candidate.trackDistance,
-      previousDistance,
-      path.totalLength,
-    );
-    const bestScore =
-      best.projectionDistance ** 2 + bestContinuity ** 2 * PATH_CONTINUITY_WEIGHT;
-    const candidateScore =
-      candidate.projectionDistance ** 2 + candidateContinuity ** 2 * PATH_CONTINUITY_WEIGHT;
+  for (const segment of path.segments) {
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const lengthSquared = dx * dx + dy * dy;
 
-    return candidateScore < bestScore ? candidate : best;
-  }, nearest);
+    if (lengthSquared <= 0) {
+      continue;
+    }
+
+    const progress = Math.min(
+      Math.max(
+        ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared,
+        0,
+      ),
+      1,
+    );
+    const x = segment.start.x + dx * progress;
+    const y = segment.start.y + dy * progress;
+    const projectionDistance = Math.hypot(point.x - x, point.y - y);
+
+    if (projectionDistance > rawLimit) {
+      continue;
+    }
+
+    const trackDistance = normalizePathDistance(
+      segment.startDistance + segment.length * progress,
+      path,
+    );
+    const score =
+      projectionDistance ** 2 +
+      circularPathDelta(trackDistance, previousDistance, path.totalLength) ** 2 *
+        PATH_CONTINUITY_WEIGHT;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestX = x;
+      bestY = y;
+      bestDistance = trackDistance;
+      bestProjection = projectionDistance;
+    }
+  }
+
+  return {
+    ...point,
+    x: bestX,
+    y: bestY,
+    trackDistance: bestDistance,
+    projectionDistance: bestProjection,
+  };
 }
 
 function pointAtTrackDistance(path: TrackPath, distance: number): NormalizedTrackPoint | null {
@@ -1217,6 +1262,200 @@ function getInterpolatedTrackPointByDriver(
   return result;
 }
 
+type TrackProgress = {
+  /** Cumulative (never wrapped) distance along the path. */
+  distance: number;
+  projectionDistance: number | null;
+  rawX: number;
+  rawY: number;
+};
+
+/** How much of a lap a driver may appear to cover between two animation frames. */
+const MAX_STEP_LAP_FRACTION = 0.15;
+
+/**
+ * Converts a wrapped position on the path into a cumulative distance, carrying the lap
+ * count across the start/finish line.
+ *
+ * Deliberately NOT forward-only. This is recomputed from scratch on every animation frame,
+ * so a forward-only rule would integrate each frame's projection noise as real progress -
+ * a ratchet that invents speed and sends markers round the circuit far faster than the
+ * cars are actually going. Allowing the small backward corrections keeps the position
+ * anchored to the telemetry, while an outright implausible step is rejected as projection
+ * ambiguity rather than accepted as a teleport.
+ */
+function advanceTrackDistance(
+  wrappedDistance: number,
+  path: TrackPath,
+  previousDistance: number | undefined,
+): number {
+  if (previousDistance === undefined || path.totalLength <= 0) {
+    return wrappedDistance;
+  }
+
+  const previousWrapped = normalizePathDistance(previousDistance, path);
+  let delta = wrappedDistance - previousWrapped;
+
+  if (path.closed) {
+    const half = path.totalLength / 2;
+    if (delta > half) {
+      delta -= path.totalLength;
+    } else if (delta < -half) {
+      delta += path.totalLength;
+    }
+  }
+
+  if (Math.abs(delta) > path.totalLength * MAX_STEP_LAP_FRACTION) {
+    return previousDistance;
+  }
+
+  return previousDistance + delta;
+}
+
+function projectSample(
+  point: TrackPoint,
+  normalizer: TrackNormalizer,
+  path: TrackPath,
+  hint: number | undefined,
+): ProjectedTrackPoint | null {
+  const normalized = normalizer.map(point);
+  return normalized ? projectPointToTrackPath(normalized, path, hint) : null;
+}
+
+/**
+ * Resolves where each driver is along the circuit, by projecting the bracketing telemetry
+ * samples onto the path FIRST and then interpolating the resulting distance.
+ *
+ * Interpolating the 2D coordinates first and projecting afterwards (the earlier approach)
+ * moves the marker along the straight chord between two samples. With OpenF1 updating a
+ * real position only every ~3.5s that chord cuts across the infield through any corner,
+ * and the projection of an off-track midpoint can land on the wrong part of the circuit.
+ * Interpolating the along-track distance instead makes the marker follow the racing line
+ * by construction, and keeps progress monotonic.
+ */
+function resolveTrackProgress(
+  sources: Map<number, TrackPoint[]>[],
+  targetTimeMs: number,
+  normalizer: TrackNormalizer,
+  path: TrackPath,
+  getPreviousDistance: (driverNumber: number) => number | undefined,
+  maxProjectionDistance: number,
+): Map<number, TrackProgress> {
+  const result = new Map<number, TrackProgress>();
+
+  if (path.totalLength <= 0) {
+    return result;
+  }
+
+  for (const pointsByDriver of sources) {
+    for (const [driverNumber, points] of pointsByDriver) {
+      if (result.has(driverNumber) || points.length === 0) {
+        continue;
+      }
+
+      const previousDistance = getPreviousDistance(driverNumber);
+      const hint =
+        previousDistance !== undefined
+          ? normalizePathDistance(previousDistance, path)
+          : undefined;
+
+      const splitIndex = upperBoundIndex(points, targetTimeMs);
+      const before = splitIndex > 0 ? points[splitIndex - 1] : null;
+      const after = splitIndex < points.length ? points[splitIndex] : null;
+      const anchor = before ?? after;
+
+      if (!anchor) {
+        continue;
+      }
+
+      const anchorProjection = projectSample(anchor, normalizer, path, hint);
+
+      if (!anchorProjection) {
+        continue;
+      }
+
+      // A sample far from the racing line means the car is somewhere the path does not
+      // describe - the pit lane, most often. Holding the last known distance is better
+      // than teleporting the marker onto an unrelated part of the circuit.
+      if (
+        anchorProjection.projectionDistance > maxProjectionDistance &&
+        previousDistance !== undefined
+      ) {
+        result.set(driverNumber, {
+          distance: previousDistance,
+          projectionDistance: anchorProjection.projectionDistance,
+          rawX: anchor.x,
+          rawY: anchor.y,
+        });
+        continue;
+      }
+
+      let wrappedDistance = anchorProjection.trackDistance;
+      const beforeTime = before ? pointTime(before) : 0;
+      const afterTime = after ? pointTime(after) : 0;
+
+      if (before && after && beforeTime > 0 && afterTime > 0 && afterTime !== beforeTime) {
+        const afterProjection = projectSample(after, normalizer, path, anchorProjection.trackDistance);
+
+        if (afterProjection) {
+          const forward = normalizePathDistance(
+            afterProjection.trackDistance - anchorProjection.trackDistance,
+            path,
+          );
+          // Anything beyond half a lap between two consecutive samples is noise or a
+          // wrap in the wrong direction, not real progress.
+          const usableForward = forward > path.totalLength * 0.5 ? 0 : forward;
+          const ratio = Math.min(
+            Math.max((targetTimeMs - beforeTime) / (afterTime - beforeTime), 0),
+            1,
+          );
+          wrappedDistance = normalizePathDistance(
+            anchorProjection.trackDistance + usableForward * ratio,
+            path,
+          );
+        }
+      } else if (before && beforeTime > 0 && targetTimeMs > beforeTime && splitIndex >= 2) {
+        // No sample ahead yet: carry on along the track at the recently observed pace
+        // rather than freezing, but only briefly and never past a plausible distance.
+        const reference = points[splitIndex - 2];
+        const referenceTime = pointTime(reference);
+        const referenceProjection =
+          referenceTime > 0
+            ? projectSample(reference, normalizer, path, anchorProjection.trackDistance)
+            : null;
+
+        if (referenceProjection && beforeTime > referenceTime) {
+          const travelled = normalizePathDistance(
+            anchorProjection.trackDistance - referenceProjection.trackDistance,
+            path,
+          );
+          const usableTravel = travelled > path.totalLength * 0.5 ? 0 : travelled;
+          const speed = usableTravel / (beforeTime - referenceTime);
+          const elapsed = Math.min(targetTimeMs - beforeTime, COAST_MAX_ELAPSED_MS);
+          // Cap the extrapolation against the LAST OBSERVED STEP, not against the lap
+          // length: coasting is meant to carry the marker a little past the newest sample
+          // while the next one arrives, never to launch it down the circuit.
+          const coasted = Math.min(speed * elapsed, usableTravel * COAST_MAX_PROGRESS);
+
+          wrappedDistance = normalizePathDistance(
+            anchorProjection.trackDistance + coasted,
+            path,
+          );
+        }
+      }
+
+      result.set(driverNumber, {
+        distance: advanceTrackDistance(wrappedDistance, path, previousDistance),
+        projectionDistance: anchorProjection.projectionDistance,
+        rawX: anchor.x,
+        rawY: anchor.y,
+      });
+    }
+  }
+
+  return result;
+}
+
 function nearestSegmentAngle(
   point: NormalizedTrackPoint,
   polyline: NormalizedTrackPoint[],
@@ -1490,10 +1729,10 @@ export function TrackMap({
     // directly instead of the telemetry-derived reconstruction. The file uses
     // the same coordinate system, so the normalizer and driver positions work
     // unchanged.
-    const polylineRaw =
-      staticTrackPoints && staticTrackPoints.length >= 50
-        ? staticTrackPoints
-        : stableTrackRef.current?.points ?? candidatePolylineRaw;
+    const usingStaticGeometry = Boolean(staticTrackPoints && staticTrackPoints.length >= 50);
+    const polylineRaw = usingStaticGeometry
+      ? (staticTrackPoints as TrackPoint[])
+      : stableTrackRef.current?.points ?? candidatePolylineRaw;
     // Prefer the pre-computed finish line from the static JSON (same session
     // as the track geometry, highest accuracy) over the runtime-inferred one.
     const effectiveFinishLine = staticFinishLine ?? finishLine;
@@ -1510,7 +1749,14 @@ export function TrackMap({
     const normalizedPolyline = dedupeNearPoints(polylineRaw, 120)
       .map((point) => normalizer.map(point))
       .filter((point): point is NonNullable<typeof point> => point !== null);
-    const polyline = extractSingleTrackLoop(normalizedPolyline);
+    // Static geometry from scripts/generate_tracks.py is already exactly one clean lap, so
+    // running loop extraction over it can only do harm: its "return to start" tolerance is
+    // ~8% of the circuit diagonal, which other parts of a real layout pass within, cutting
+    // a chunk of the track away. Only the telemetry-derived reconstruction, which spans
+    // many laps, needs trimming.
+    const polyline = usingStaticGeometry
+      ? normalizedPolyline
+      : extractSingleTrackLoop(normalizedPolyline);
     const path = buildTrackPath(polyline);
     const maxProjectionDistance = Math.min(
       Math.max(
@@ -1591,46 +1837,74 @@ export function TrackMap({
         ? getInterpolatedTrackPointByDriver(livePointsByDriver, currentMotionTimeMs)
         : getLatestTrackPointByDriver(livePointsByDriver);
 
+    // Preferred path: interpolate the along-track distance. The 2D maps above stay as the
+    // fallback for when there is no usable circuit path to project onto yet.
+    const progressByDriver =
+      currentMotionTimeMs && baseData.path.totalLength > 0
+        ? resolveTrackProgress(
+            [currentPointsByDriver, livePointsByDriver, standingPointsByDriver],
+            currentMotionTimeMs,
+            baseData.normalizer,
+            baseData.path,
+            (driverNumber) => driverPathRef.current.get(driverNumber),
+            baseData.maxProjectionDistance,
+          )
+        : new Map<number, TrackProgress>();
+
     const mappedDrivers = standings
       .filter((row) => row.status !== "OUT")
       .map((row) => {
+        const progress = progressByDriver.get(row.driverNumber);
         const markerPoint =
           currentPointByDriver.get(row.driverNumber) ??
           livePointByDriver.get(row.driverNumber) ??
           standingPointByDriver.get(row.driverNumber) ??
           null;
 
-        if (!markerPoint) {
+        if (!progress && !markerPoint) {
           return null;
         }
 
-        const normalized = baseData.normalizer.map(markerPoint);
-        if (!normalized) {
+        const normalized = markerPoint ? baseData.normalizer.map(markerPoint) : null;
+
+        if (!progress && !normalized) {
           return null;
         }
 
-        const previousDistance = driverPathRef.current.get(row.driverNumber);
-        const previousWrappedDistance =
-          previousDistance !== undefined && baseData.path.totalLength > 0
-            ? normalizePathDistance(previousDistance, baseData.path)
-            : undefined;
-        const projected =
-          baseData.path.totalLength > 0
-            ? projectPointToTrackPath(normalized, baseData.path, previousWrappedDistance)
-            : null;
-        const projectedTooFar =
-          projected !== null &&
-          projected.projectionDistance > baseData.maxProjectionDistance;
-        const trackDistance =
-          projected && baseData.path.totalLength > 0
-            ? projectedTooFar && previousDistance !== undefined
-              ? previousDistance
-              : accumulateTrackDistance(projected.trackDistance, baseData.path, previousDistance)
-            : null;
+        // Along-track interpolation when the circuit path is usable, otherwise fall back
+        // to projecting the 2D-interpolated point.
+        let trackDistance: number | null = progress?.distance ?? null;
+        let projectionDistance: number | null = progress?.projectionDistance ?? null;
+
+        if (trackDistance === null && normalized) {
+          const previousDistance = driverPathRef.current.get(row.driverNumber);
+          const previousWrappedDistance =
+            previousDistance !== undefined && baseData.path.totalLength > 0
+              ? normalizePathDistance(previousDistance, baseData.path)
+              : undefined;
+          const projected =
+            baseData.path.totalLength > 0
+              ? projectPointToTrackPath(normalized, baseData.path, previousWrappedDistance)
+              : null;
+
+          if (projected) {
+            projectionDistance = projected.projectionDistance;
+            trackDistance =
+              projected.projectionDistance > baseData.maxProjectionDistance &&
+              previousDistance !== undefined
+                ? previousDistance
+                : accumulateTrackDistance(projected.trackDistance, baseData.path, previousDistance);
+          }
+        }
+
         const displayPoint =
           trackDistance !== null
             ? (pointAtTrackDistance(baseData.path, trackDistance) ?? normalized)
             : normalized;
+
+        if (!displayPoint) {
+          return null;
+        }
 
         return {
           driverNumber: row.driverNumber,
@@ -1648,10 +1922,10 @@ export function TrackMap({
           totalLaps: row.totalLaps,
           x: displayPoint.x,
           y: displayPoint.y,
-          rawX: normalized.rawX,
-          rawY: normalized.rawY,
+          rawX: normalized?.rawX ?? progress?.rawX ?? 0,
+          rawY: normalized?.rawY ?? progress?.rawY ?? 0,
           trackDistance,
-          projectionDistance: projected?.projectionDistance ?? null,
+          projectionDistance,
         } satisfies NormalizedDriverTrackPosition;
       })
       .filter((driver): driver is NormalizedDriverTrackPosition => driver !== null);
@@ -1740,50 +2014,39 @@ export function TrackMap({
         // accurate between renders without any additional prop or state.
         const currentMotionTimeMs = motionTimeBase + (Date.now() - rafLastRenderRef.current);
         const maxProjDist = rafMaxProjectionRef.current;
-        const hasCurrentPts = rafCurrentPtsRef.current.size > 0;
 
-        const currentPts = getInterpolatedTrackPointByDriver(rafCurrentPtsRef.current, currentMotionTimeMs);
-        const standingPts = hasCurrentPts
-          ? (new Map() as Map<number, TrackPoint>)
-          : getInterpolatedTrackPointByDriver(rafStandingPtsRef.current, currentMotionTimeMs);
-        const livePts = hasCurrentPts
-          ? (new Map() as Map<number, TrackPoint>)
-          : getInterpolatedTrackPointByDriver(rafLivePtsRef.current, currentMotionTimeMs);
+        // Interpolate ALONG the track rather than through space: the bracketing samples are
+        // projected onto the path first and the resulting distance is interpolated. With
+        // OpenF1 reporting a genuinely new position only every ~3.5s, interpolating the raw
+        // coordinates instead would slide the marker down the straight chord between two
+        // samples, cutting across the infield on every corner.
+        // Priority order, resolved PER DRIVER: a driver missing from the fresh window must
+        // fall back to the wider feeds rather than being skipped, otherwise its marker
+        // freezes and then teleports when it reappears.
+        const progress = resolveTrackProgress(
+          [rafCurrentPtsRef.current, rafLivePtsRef.current, rafStandingPtsRef.current],
+          currentMotionTimeMs,
+          normalizer,
+          path,
+          (driverNumber) => displayedMarkerRef.current.get(driverNumber)?.trackDistance ?? undefined,
+          maxProjDist,
+        );
 
         for (const driverNumber of rafActiveDriversRef.current) {
           const node = markerNodeRefs.current.get(driverNumber);
           if (!node) continue;
 
-          const point = currentPts.get(driverNumber) ?? livePts.get(driverNumber) ?? standingPts.get(driverNumber);
-          if (!point) continue;
+          const resolved = progress.get(driverNumber);
+          if (!resolved) continue;
 
-          const normalized = normalizer.map(point);
-          if (!normalized) continue;
-
-          const previous = displayedMarkerRef.current.get(driverNumber);
-          const previousWrapped =
-            previous?.trackDistance != null
-              ? normalizePathDistance(previous.trackDistance, path)
-              : undefined;
-
-          const projected = projectPointToTrackPath(normalized, path, previousWrapped);
-          if (!projected) continue;
-
-          // Hold position when the telemetry point is too far off-path (e.g. pit lane gap)
-          if (projected.projectionDistance > maxProjDist && previous?.trackDistance != null) continue;
-
-          const trackDistance = accumulateTrackDistance(
-            projected.trackDistance,
-            path,
-            previous?.trackDistance ?? undefined,
-          );
-          const displayPoint = pointAtTrackDistance(path, trackDistance) ?? normalized;
+          const displayPoint = pointAtTrackDistance(path, resolved.distance);
+          if (!displayPoint) continue;
 
           node.style.transform = `translate(${displayPoint.x}px, ${displayPoint.y}px)`;
           displayedMarkerRef.current.set(driverNumber, {
             x: displayPoint.x,
             y: displayPoint.y,
-            trackDistance,
+            trackDistance: resolved.distance,
           });
         }
       }
