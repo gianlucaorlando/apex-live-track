@@ -592,8 +592,6 @@ function extractSingleTrackLoop(points: NormalizedTrackPoint[]): NormalizedTrack
   );
   const start = points[0];
   let travelled = 0;
-  let bestEndIndex = -1;
-  let bestTravelled = 0;
 
   for (let index = 1; index < points.length; index += 1) {
     travelled += normalizedDistance(points[index - 1], points[index]);
@@ -602,18 +600,18 @@ function extractSingleTrackLoop(points: NormalizedTrackPoint[]): NormalizedTrack
       continue;
     }
 
-    // A concatenated multi-lap trace can pass close to its own starting point more than
-    // once (e.g. a pit-lane entry near the start/finish straight) before actually
-    // completing a full lap. Keep scanning and take the largest valid loop found instead
-    // of stopping at the first candidate, so a coincidental early "near return" doesn't
-    // truncate the track and cut out a whole section of the circuit.
-    if (normalizedDistance(start, points[index]) <= returnTolerance && travelled > bestTravelled) {
-      bestEndIndex = index;
-      bestTravelled = travelled;
+    // Stop at the FIRST return to the start point. The source trace spans the whole
+    // session, so it passes the start line once per lap; scanning for a "better" (longer)
+    // return would concatenate every lap into one self-overlapping polyline, which both
+    // draws a garbled circuit and makes the marker projection jump between overlapping
+    // passes. The guards above (minimum point count and travelled distance) are what
+    // prevent an early false positive here.
+    if (normalizedDistance(start, points[index]) <= returnTolerance) {
+      return points.slice(0, index + 1);
     }
   }
 
-  return bestEndIndex >= 0 ? points.slice(0, bestEndIndex + 1) : points;
+  return points;
 }
 
 type TrackPathSegment = {
@@ -1016,11 +1014,25 @@ function groupTrackPointsByDriver(points: TrackPoint[]): Map<number, TrackPoint[
     }
 
     const bucket = grouped.get(point.driverNumber);
-    if (bucket) {
-      bucket.push(point);
-    } else {
+
+    if (!bucket) {
       grouped.set(point.driverNumber, [point]);
+      continue;
     }
+
+    // OpenF1 repeats the same coordinates many times between actual position updates: in a
+    // 45s window a driver typically has ~170 samples but only ~13 distinct positions. Kept
+    // as-is, the interpolation below would bracket two identical samples and hold the
+    // marker still, then jump when a new coordinate finally appears - the stutter this
+    // view is prone to. Collapsing each run of repeats to its FIRST occurrence turns the
+    // feed back into genuine motion samples: the marker then glides across the whole run
+    // instead of stalling through it.
+    const previous = bucket[bucket.length - 1];
+    if (previous.x === point.x && previous.y === point.y) {
+      continue;
+    }
+
+    bucket.push(point);
   }
 
   return grouped;
