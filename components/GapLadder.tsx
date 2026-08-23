@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowRightLeft, MousePointer2 } from "lucide-react";
+import { DriverProfileCard } from "@/components/DriverProfileCard";
 import { circuitName, t, type Locale } from "@/lib/i18n";
 import type { F1Meeting, F1Session, LiveStandingRow } from "@/types/f1";
 
@@ -229,6 +230,8 @@ export function GapLadder({
 
   const hasLane = racers.length >= 2;
   const isRace = session?.sessionType?.toLowerCase().includes("race") ?? true;
+  const selectedRow =
+    standings.find((row) => row.driverNumber === selectedDriverNumber) ?? null;
 
   return (
     <section
@@ -414,6 +417,14 @@ export function GapLadder({
           </aside>
         ) : null}
       </div>
+
+      {selectedRow ? (
+        <DriverProfileCard
+          driver={selectedRow}
+          locale={locale}
+          onClose={() => onSelectDriver(null)}
+        />
+      ) : null}
     </section>
   );
 }
