@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Map, Trophy } from "lucide-react";
+import { ArrowRightLeft, CalendarDays, Map, Trophy } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
+import { GapLadder } from "@/components/GapLadder";
 import { LiveStandings } from "@/components/LiveStandings";
 import { LoadingState } from "@/components/LoadingState";
 import { MotorsportNews } from "@/components/MotorsportNews";
@@ -23,6 +24,54 @@ interface DashboardProps {
 }
 
 type DashboardView = "track" | "calendar" | "season-standings";
+
+// Visualizzazione della vista "Tracciato": corsia dei distacchi (fluida, basata su
+// intervalli scalari) oppure mappa del circuito (posizioni x/y, ~3,7 Hz).
+type TrackViewMode = "ladder" | "map";
+
+const TRACK_VIEW_MODE_STORAGE_KEY = "f1-live-track-view-mode";
+
+interface TrackViewToggleProps {
+  mode: TrackViewMode;
+  locale: Locale;
+  onChange: (mode: TrackViewMode) => void;
+}
+
+function TrackViewToggle({ mode, locale, onChange }: TrackViewToggleProps) {
+  const options: { mode: TrackViewMode; label: string; icon: typeof Map }[] = [
+    { mode: "ladder", label: t(locale, "viewModeLadder"), icon: ArrowRightLeft },
+    { mode: "map", label: t(locale, "viewModeMap"), icon: Map },
+  ];
+
+  return (
+    <nav
+      className="flex flex-none items-center gap-1 self-start rounded-lg border border-white/10 bg-neutral-950/85 p-0.5"
+      aria-label={t(locale, "viewModeAria")}
+    >
+      {options.map((option) => {
+        const active = mode === option.mode;
+        const Icon = option.icon;
+
+        return (
+          <button
+            key={option.mode}
+            type="button"
+            onClick={() => onChange(option.mode)}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold transition ${
+              active
+                ? "bg-white text-neutral-950"
+                : "text-neutral-300 hover:bg-white/10 hover:text-white"
+            }`}
+            aria-pressed={active}
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+            {option.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 interface ViewTabsProps {
   activeView: DashboardView;
@@ -76,6 +125,8 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE);
   const [localeHydrated, setLocaleHydrated] = useState(false);
   const [activeView, setActiveView] = useState<DashboardView>("track");
+  const [trackViewMode, setTrackViewMode] = useState<TrackViewMode>("ladder");
+  const [trackViewHydrated, setTrackViewHydrated] = useState(false);
   const [hoveredDriver, setHoveredDriver] = useState<number | null>(null);
   const [selectedDriverNumber, setSelectedDriverNumber] = useState<number | null>(null);
   const [weather, setWeather] = useState<RaceWeather | null>(null);
@@ -101,6 +152,22 @@ export function Dashboard({ initialDemo }: DashboardProps) {
     setLocale(normalizeLocale(window.localStorage.getItem("f1-live-track-locale")));
     setLocaleHydrated(true);
   }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
+
+    if (stored === "ladder" || stored === "map") {
+      setTrackViewMode(stored);
+    }
+
+    setTrackViewHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (trackViewHydrated) {
+      window.localStorage.setItem(TRACK_VIEW_MODE_STORAGE_KEY, trackViewMode);
+    }
+  }, [trackViewHydrated, trackViewMode]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -277,20 +344,44 @@ export function Dashboard({ initialDemo }: DashboardProps) {
 
           {activeView === "track" ? (
             <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(12rem,0.58fr)] gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(34rem,0.54fr)] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_40rem]">
-              <TrackMap
-                meeting={liveData.meeting}
-                standings={liveData.standings}
-                trackPoints={liveData.trackPoints}
-                currentTrackPoints={liveData.currentTrackPoints}
-                finishLine={liveData.finishLine}
-                weather={weather}
-                motionTimeMs={liveData.motionTimeMs}
-                hoveredDriver={hoveredDriver}
-                selectedDriverNumber={selectedDriverNumber}
-                locale={locale}
-                onHoverDriver={setHoveredDriver}
-                onSelectDriver={setSelectedDriverNumber}
-              />
+              <div className="flex min-h-0 flex-col gap-2">
+                <TrackViewToggle
+                  mode={trackViewMode}
+                  locale={locale}
+                  onChange={setTrackViewMode}
+                />
+                {trackViewMode === "ladder" ? (
+                  <div className="min-h-0 flex-1">
+                    <GapLadder
+                      session={liveData.session}
+                      meeting={liveData.meeting}
+                      standings={liveData.standings}
+                      hoveredDriver={hoveredDriver}
+                      selectedDriverNumber={selectedDriverNumber}
+                      locale={locale}
+                      onHoverDriver={setHoveredDriver}
+                      onSelectDriver={setSelectedDriverNumber}
+                    />
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1">
+                    <TrackMap
+                      meeting={liveData.meeting}
+                      standings={liveData.standings}
+                      trackPoints={liveData.trackPoints}
+                      currentTrackPoints={liveData.currentTrackPoints}
+                      finishLine={liveData.finishLine}
+                      weather={weather}
+                      motionTimeMs={liveData.motionTimeMs}
+                      hoveredDriver={hoveredDriver}
+                      selectedDriverNumber={selectedDriverNumber}
+                      locale={locale}
+                      onHoverDriver={setHoveredDriver}
+                      onSelectDriver={setSelectedDriverNumber}
+                    />
+                  </div>
+                )}
+              </div>
               <div className="grid min-h-0 grid-cols-3 gap-3 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)_minmax(8rem,0.7fr)]">
                 <LiveStandings
                   rows={liveData.standings}

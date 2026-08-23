@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEMO_REPLAY_OFFSET_SECONDS } from "@/lib/f1Constants";
+import { gapMetrics } from "@/lib/f1Transform";
 import { formatGap, formatInterval } from "@/lib/format";
 import { apiMessage, t, type Locale } from "@/lib/i18n";
 import { locationToTrackPoint } from "@/lib/track";
@@ -310,6 +311,7 @@ function applyStreamPosition(
       gap: position.position === 1 ? formatGap(null, position.position, locale) : row.gap,
       interval:
         position.position === 1 ? formatInterval(null, position.position, locale) : row.interval,
+      gapSeconds: position.position === 1 ? 0 : row.gapSeconds,
       updatedAt: position.date || row.updatedAt,
     };
   });
@@ -333,6 +335,7 @@ function applyStreamInterval(
       ...row,
       gap: formatGap(interval.gapToLeader, row.position, locale),
       interval: formatInterval(interval.interval, row.position, locale),
+      ...gapMetrics(interval.gapToLeader, interval.interval, row.position),
       updatedAt: interval.date || row.updatedAt,
     };
   });
@@ -518,10 +521,11 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
         setPartial(true);
         setMessages((current) => mergeMessages(current, clientError.meta ?? undefined, locale));
 
-        // A 429 with nothing on screen yet (typical right after a cold start) would
-        // otherwise leave the app stuck on this error banner until the user clicks
-        // refresh - retry on its own with a capped exponential backoff instead.
-        if (clientError.rateLimited) {
+        // Un errore al bootstrap (429, ma anche i 504/5xx tipici del primo avvio a
+        // freddo, con cache server vuota e token da negoziare) lascerebbe l'app
+        // ferma sul banner finche' l'utente non clicca "Riprova" - riprova da sola
+        // con backoff esponenziale limitato.
+        if (clientError.rateLimited || clientError.status >= 500) {
           const attempt = bootstrapRetryRef.current.attempt;
           const delay = Math.min(3000 * 2 ** attempt, 20000);
           bootstrapRetryRef.current.attempt = attempt + 1;

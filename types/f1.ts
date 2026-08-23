@@ -150,6 +150,12 @@ export interface LiveStandingRow {
   position: number | null;
   gap: string;
   interval: string;
+  /** Distacco dal leader in secondi quando numerico (0 per il leader), null per doppiati o dato assente. */
+  gapSeconds: number | null;
+  /** Intervallo dal pilota davanti in secondi quando numerico. */
+  intervalSeconds: number | null;
+  /** Giri di ritardo quando il distacco e' del tipo "+N LAP". */
+  lappedCount: number | null;
   status: DriverStatus | null;
   tyre: DriverTyreInfo | null;
   currentLap: number | null;

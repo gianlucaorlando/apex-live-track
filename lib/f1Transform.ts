@@ -3,6 +3,7 @@ import type { Locale } from "@/lib/i18n";
 import { getLatestLocationByDriver } from "@/lib/track";
 import type {
   F1Driver,
+  GapValue,
   F1Interval,
   F1Lap,
   F1LocationPoint,
@@ -380,6 +381,34 @@ function totalLapsFromResults(results: F1SessionResult[]): number | null {
   return laps.length > 0 ? Math.max(...laps) : null;
 }
 
+/**
+ * Valori numerici del distacco, usati dalla corsia dei distacchi per interpolare
+ * il movimento (i campi `gap`/`interval` formattati non sono ri-parsabili in modo
+ * affidabile perche' localizzati).
+ */
+export function gapMetrics(
+  rawGap: GapValue,
+  rawInterval: GapValue,
+  position: number | null,
+): Pick<LiveStandingRow, "gapSeconds" | "intervalSeconds" | "lappedCount"> {
+  const lappedMatch =
+    typeof rawGap === "string"
+      ? rawGap.toLocaleUpperCase("en-US").match(/(\d+)\s*LAP/)
+      : null;
+
+  return {
+    gapSeconds:
+      position === 1
+        ? 0
+        : typeof rawGap === "number" && Number.isFinite(rawGap)
+          ? rawGap
+          : null,
+    intervalSeconds:
+      typeof rawInterval === "number" && Number.isFinite(rawInterval) ? rawInterval : null,
+    lappedCount: lappedMatch ? Number.parseInt(lappedMatch[1], 10) : null,
+  };
+}
+
 export function buildStandings({
   drivers,
   positions,
@@ -440,6 +469,7 @@ export function buildStandings({
         position: currentPosition,
         gap: formatGap(rawGap, currentPosition, locale),
         interval: formatInterval(rawInterval, currentPosition, locale),
+        ...gapMetrics(rawGap, rawInterval, currentPosition),
         status:
           useSessionResultFallback && (result?.dnf || result?.dns || result?.dsq)
             ? "OUT"
