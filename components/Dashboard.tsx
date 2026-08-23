@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, CalendarDays, Map, Trophy } from "lucide-react";
+import { ArrowRightLeft, CalendarDays, Gamepad2, Map, Trophy } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
 import { GapLadder } from "@/components/GapLadder";
 import { LiveStandings } from "@/components/LiveStandings";
@@ -26,8 +26,9 @@ interface DashboardProps {
 type DashboardView = "track" | "calendar" | "season-standings";
 
 // Visualizzazione della vista "Tracciato": corsia dei distacchi (fluida, basata su
-// intervalli scalari) oppure mappa del circuito (posizioni x/y, ~3,7 Hz).
-type TrackViewMode = "ladder" | "map";
+// intervalli scalari), mappa del circuito (posizioni x/y, ~3,7 Hz) oppure la stessa
+// mappa con la skin "game" in stile racing game 2D dall'alto.
+type TrackViewMode = "ladder" | "map" | "game";
 
 const TRACK_VIEW_MODE_STORAGE_KEY = "f1-live-track-view-mode";
 
@@ -41,6 +42,7 @@ function TrackViewToggle({ mode, locale, onChange }: TrackViewToggleProps) {
   const options: { mode: TrackViewMode; label: string; icon: typeof Map }[] = [
     { mode: "ladder", label: t(locale, "viewModeLadder"), icon: ArrowRightLeft },
     { mode: "map", label: t(locale, "viewModeMap"), icon: Map },
+    { mode: "game", label: t(locale, "viewModeGame"), icon: Gamepad2 },
   ];
 
   return (
@@ -156,7 +158,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   useEffect(() => {
     const stored = window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
 
-    if (stored === "ladder" || stored === "map") {
+    if (stored === "ladder" || stored === "map" || stored === "game") {
       setTrackViewMode(stored);
     }
 
@@ -365,6 +367,9 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1">
+                    {/* Mappa e Arcade condividono la stessa istanza di TrackMap
+                        (cambia solo la prop skin), cosi' il passaggio tra le due
+                        non rimonta il componente ne' azzera l'animazione. */}
                     <TrackMap
                       meeting={liveData.meeting}
                       standings={liveData.standings}
@@ -376,6 +381,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                       hoveredDriver={hoveredDriver}
                       selectedDriverNumber={selectedDriverNumber}
                       locale={locale}
+                      skin={trackViewMode === "game" ? "game" : "classic"}
                       onHoverDriver={setHoveredDriver}
                       onSelectDriver={setSelectedDriverNumber}
                     />

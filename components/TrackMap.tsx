@@ -44,6 +44,13 @@ import type {
 import type { DriverProfile, DriverProfileApiResponse } from "@/types/driver";
 import type { RaceWeather, WeatherCondition } from "@/types/weather";
 
+/**
+ * Stile di rendering della mappa: "classic" e' l'attuale linea scura/asfalto
+ * bianco, "game" ricrea la vista dall'alto di un racing game 2D (prato,
+ * asfalto grigio, cordoli rosso-bianchi sulle curve, auto orientate).
+ */
+export type TrackSkin = "classic" | "game";
+
 interface TrackMapProps {
   meeting: F1Meeting | null;
   standings: LiveStandingRow[];
@@ -55,6 +62,7 @@ interface TrackMapProps {
   hoveredDriver: number | null;
   selectedDriverNumber: number | null;
   locale: Locale;
+  skin?: TrackSkin;
   onHoverDriver: (driverNumber: number | null) => void;
   onSelectDriver: (driverNumber: number | null) => void;
 }
@@ -1495,6 +1503,132 @@ function nearestSegmentAngle(
   return bestAngle;
 }
 
+interface GameCornerRun {
+  points: string;
+  sharp: boolean;
+}
+
+// Individua i tratti in curva della polyline (per disegnare cordoli e vie di
+// fuga della skin "game"): somma degli angoli di sterzata su una finestra
+// mobile, riempimento dei buchi brevi, poi estrazione dei tratti contigui.
+function detectCornerRuns(
+  polyline: NormalizedTrackPoint[],
+  closed: boolean,
+): GameCornerRun[] {
+  const n = polyline.length;
+
+  if (n < 12) {
+    return [];
+  }
+
+  const heading = new Array<number>(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    const a = polyline[i];
+    const b = polyline[closed ? (i + 1) % n : Math.min(i + 1, n - 1)];
+    heading[i] =
+      a.x === b.x && a.y === b.y
+        ? i > 0
+          ? heading[i - 1]
+          : 0
+        : Math.atan2(b.y - a.y, b.x - a.x);
+  }
+
+  const turn = new Array<number>(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    if (!closed && i === 0) {
+      continue;
+    }
+
+    let delta = heading[i] - heading[(i - 1 + n) % n];
+
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    turn[i] = delta;
+  }
+
+  const WINDOW = 2;
+  const score = new Array<number>(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+
+    for (let k = -WINDOW; k <= WINDOW; k++) {
+      const j = closed ? (i + k + n) % n : Math.min(Math.max(i + k, 0), n - 1);
+      sum += turn[j];
+    }
+
+    score[i] = Math.abs(sum);
+  }
+
+  const isCorner = score.map((value) => value > 0.22);
+  const filled = isCorner.slice();
+
+  for (let i = 0; i < n; i++) {
+    if (isCorner[i]) {
+      continue;
+    }
+
+    const near = (offsets: number[]) =>
+      offsets.some((offset) => {
+        const j = closed ? (i + offset + n) % n : i + offset;
+        return j >= 0 && j < n && isCorner[j];
+      });
+
+    if (near([-1, -2]) && near([1, 2])) {
+      filled[i] = true;
+    }
+  }
+
+  const rawRuns: { start: number; end: number }[] = [];
+  let i = 0;
+
+  while (i < n) {
+    if (!filled[i]) {
+      i++;
+      continue;
+    }
+
+    let j = i;
+
+    while (j + 1 < n && filled[j + 1]) j++;
+    rawRuns.push({ start: i, end: j });
+    i = j + 1;
+  }
+
+  // Su un anello chiuso il tratto a cavallo dell'indice 0 va ricongiunto.
+  if (closed && rawRuns.length >= 2) {
+    const first = rawRuns[0];
+    const last = rawRuns[rawRuns.length - 1];
+
+    if (first.start === 0 && last.end === n - 1) {
+      last.end = first.end + n;
+      rawRuns.shift();
+    }
+  }
+
+  return rawRuns
+    .filter((run) => run.end - run.start + 1 >= 3)
+    .map((run) => {
+      const parts: string[] = [];
+      let sharp = false;
+
+      for (let k = run.start - 2; k <= run.end + 2; k++) {
+        const index = closed
+          ? ((k % n) + n) % n
+          : Math.min(Math.max(k, 0), n - 1);
+        parts.push(`${polyline[index].x.toFixed(1)},${polyline[index].y.toFixed(1)}`);
+
+        if (score[index] > 0.55) {
+          sharp = true;
+        }
+      }
+
+      return { points: parts.join(" "), sharp };
+    });
+}
+
 export function TrackMap({
   meeting,
   standings,
@@ -1506,6 +1640,7 @@ export function TrackMap({
   hoveredDriver,
   selectedDriverNumber,
   locale,
+  skin = "classic",
   onHoverDriver,
   onSelectDriver,
 }: TrackMapProps) {
@@ -1532,6 +1667,10 @@ export function TrackMap({
   // render cycle (see the layout effect below) so a multi-second real-world gap can be
   // animated as a chain of short, curve-following steps instead of one straight-line jump.
   const markerNodeRefs = useRef<Map<number, SVGGElement>>(new Map());
+  // Skin "game": nodo interno da ruotare lungo la tangente e verso di marcia
+  // corrente per pilota (+1 = distanza crescente lungo il path).
+  const rotorNodeRefs = useRef<Map<number, SVGGElement>>(new Map());
+  const markerDirectionRef = useRef<Map<number, 1 | -1>>(new Map());
   const displayedMarkerRef = useRef<
     Map<number, { x: number; y: number; trackDistance: number | null }>
   >(new Map());
@@ -1549,6 +1688,11 @@ export function TrackMap({
   const rafActiveDriversRef = useRef<Set<number>>(new Set());
   const rafMotionTimeMsRef = useRef<number | null>(null);
   const rafLastRenderRef = useRef<number>(Date.now());
+  const rafSkinRef = useRef<TrackSkin>(skin);
+
+  useLayoutEffect(() => {
+    rafSkinRef.current = skin;
+  }, [skin]);
 
   useEffect(() => {
     driverPathRef.current.clear();
@@ -2042,6 +2186,33 @@ export function TrackMap({
           const displayPoint = pointAtTrackDistance(path, resolved.distance);
           if (!displayPoint) continue;
 
+          // Skin "game": orienta lo sprite dell'auto lungo la tangente del
+          // tracciato, nel verso di marcia dedotto dall'avanzamento recente.
+          if (rafSkinRef.current === "game") {
+            const previous = displayedMarkerRef.current.get(driverNumber);
+            const total = path.totalLength;
+            let direction = markerDirectionRef.current.get(driverNumber) ?? 1;
+
+            if (previous?.trackDistance !== null && previous !== undefined && total > 0) {
+              let delta = resolved.distance - (previous.trackDistance ?? resolved.distance);
+              delta = ((((delta + total / 2) % total) + total) % total) - total / 2;
+
+              if (Math.abs(delta) > 0.6) {
+                direction = delta >= 0 ? 1 : -1;
+                markerDirectionRef.current.set(driverNumber, direction);
+              }
+            }
+
+            const ahead = pointAtTrackDistance(path, resolved.distance + 5 * direction);
+            const behind = pointAtTrackDistance(path, resolved.distance - 5 * direction);
+            const rotor = rotorNodeRefs.current.get(driverNumber);
+
+            if (rotor && ahead && behind && (ahead.x !== behind.x || ahead.y !== behind.y)) {
+              const angle = (Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180) / Math.PI;
+              rotor.setAttribute("transform", `rotate(${angle.toFixed(1)})`);
+            }
+          }
+
           node.style.transform = `translate(${displayPoint.x}px, ${displayPoint.y}px)`;
           displayedMarkerRef.current.set(driverNumber, {
             x: displayPoint.x,
@@ -2091,6 +2262,10 @@ export function TrackMap({
   const polylinePoints = polylineRenderPoints
     .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
+  const cornerRuns = useMemo(
+    () => (skin === "game" ? detectCornerRuns(baseData.polyline, baseData.path.closed) : []),
+    [baseData.path.closed, baseData.polyline, skin],
+  );
   const hasTrack = baseData.polyline.length >= 3;
   const weatherState = rainState(weather, locale);
   const selectedStandingRow =
@@ -2206,39 +2381,140 @@ export function TrackMap({
           <filter id="marker-glow" x="-100%" y="-100%" width="300%" height="300%">
             <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#f8fafc" floodOpacity="0.35" />
           </filter>
+          {skin === "game" ? (
+            <pattern
+              id="game-grass"
+              width="72"
+              height="72"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(-18)"
+            >
+              <rect width="72" height="72" fill="#41924a" />
+              <rect width="36" height="72" fill="#3a8542" />
+            </pattern>
+          ) : null}
           {drivers.map((driver) => (
             <clipPath key={avatarClipId(driver.driverNumber)} id={avatarClipId(driver.driverNumber)}>
               <circle r="21" cx="0" cy="0" />
             </clipPath>
           ))}
         </defs>
-        <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="rgba(0,0,0,0.18)" />
-        <g opacity="0.13">
-          {Array.from({ length: 12 }).map((_, index) => (
-            <line
-              key={`grid-x-${index}`}
-              x1={(SVG_WIDTH / 12) * index}
-              y1="0"
-              x2={(SVG_WIDTH / 12) * index}
-              y2={SVG_HEIGHT}
-              stroke="#ffffff"
-              strokeWidth="1"
-            />
-          ))}
-          {Array.from({ length: 8 }).map((_, index) => (
-            <line
-              key={`grid-y-${index}`}
-              x1="0"
-              y1={(SVG_HEIGHT / 8) * index}
-              x2={SVG_WIDTH}
-              y2={(SVG_HEIGHT / 8) * index}
-              stroke="#ffffff"
-              strokeWidth="1"
-            />
-          ))}
-        </g>
+        {skin === "game" ? (
+          // Sovradimensionato rispetto al viewBox: con preserveAspectRatio il
+          // pannello puo' essere piu' largo/alto del viewBox e il prato deve
+          // riempire comunque tutta l'area visibile, senza bande scure ai lati.
+          <rect
+            x={-SVG_WIDTH * 2}
+            y={-SVG_HEIGHT * 2}
+            width={SVG_WIDTH * 5}
+            height={SVG_HEIGHT * 5}
+            fill="url(#game-grass)"
+          />
+        ) : (
+          <>
+            <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="rgba(0,0,0,0.18)" />
+            <g opacity="0.13">
+              {Array.from({ length: 12 }).map((_, index) => (
+                <line
+                  key={`grid-x-${index}`}
+                  x1={(SVG_WIDTH / 12) * index}
+                  y1="0"
+                  x2={(SVG_WIDTH / 12) * index}
+                  y2={SVG_HEIGHT}
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+              ))}
+              {Array.from({ length: 8 }).map((_, index) => (
+                <line
+                  key={`grid-y-${index}`}
+                  x1="0"
+                  y1={(SVG_HEIGHT / 8) * index}
+                  x2={SVG_WIDTH}
+                  y2={(SVG_HEIGHT / 8) * index}
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+              ))}
+            </g>
+          </>
+        )}
 
-        {hasTrack ? (
+        {hasTrack && skin === "game" ? (
+          <g>
+            {/* Vie di fuga sabbiose all'esterno delle curve piu' strette */}
+            {cornerRuns
+              .filter((run) => run.sharp)
+              .map((run, index) => (
+                <polyline
+                  key={`sand-${index}`}
+                  points={run.points}
+                  fill="none"
+                  stroke="#d9c58f"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="46"
+                  opacity="0.85"
+                />
+              ))}
+            {/* Cordoli rosso-bianchi sui tratti in curva */}
+            {cornerRuns.map((run, index) => (
+              <g key={`kerb-${index}`}>
+                <polyline
+                  points={run.points}
+                  fill="none"
+                  stroke="#f4f4f5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="21"
+                />
+                <polyline
+                  points={run.points}
+                  fill="none"
+                  stroke="#dc2626"
+                  strokeDasharray="9 9"
+                  strokeLinecap="butt"
+                  strokeLinejoin="round"
+                  strokeWidth="21"
+                />
+              </g>
+            ))}
+            {/* Asfalto con bordo bianco e traiettoria gommata */}
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="#52525b"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="18"
+            />
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="#e5e7eb"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="15.5"
+            />
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="#8d939c"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="12.5"
+            />
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="#71767e"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="3.5"
+              opacity="0.8"
+            />
+          </g>
+        ) : hasTrack ? (
           <g>
             <polyline
               points={polylinePoints}
@@ -2373,66 +2649,137 @@ export function TrackMap({
               filter={active ? "url(#marker-glow)" : undefined}
             >
               <title>{markerTitle(driver, locale)}</title>
-              <circle
-                r={radius}
-                fill={driver.teamColour}
-                stroke="#ffffff"
-                strokeWidth={active ? 4 : 3}
-              />
-              {driver.headshotUrl ? (
-                <image
-                  href={driver.headshotUrl}
-                  x={-imageRadius}
-                  y={-imageRadius}
-                  width={imageRadius * 2}
-                  height={imageRadius * 2}
-                  preserveAspectRatio="xMidYMid slice"
-                  clipPath={`url(#${avatarClipId(driver.driverNumber)})`}
-                />
+              {skin === "game" ? (
+                <>
+                  {/* Area di click generosa: lo sprite e' sottile */}
+                  <circle r="17" fill="transparent" />
+                  <g
+                    ref={(node) => {
+                      if (node) {
+                        rotorNodeRefs.current.set(driver.driverNumber, node);
+                      } else {
+                        rotorNodeRefs.current.delete(driver.driverNumber);
+                      }
+                    }}
+                  >
+                    {/* Monoposto vista dall'alto, punta verso +x; la rotazione
+                        lungo la tangente e' applicata dal loop rAF. */}
+                    <g transform={`scale(${active ? 1.35 : 1.05})`}>
+                      <rect x="-12.5" y="-8" width="6.5" height="4.4" rx="1.4" fill="#101014" />
+                      <rect x="-12.5" y="3.6" width="6.5" height="4.4" rx="1.4" fill="#101014" />
+                      <rect x="4.5" y="-7.4" width="5.6" height="4" rx="1.3" fill="#101014" />
+                      <rect x="4.5" y="3.4" width="5.6" height="4" rx="1.3" fill="#101014" />
+                      <rect x="-16" y="-6.4" width="3.2" height="12.8" rx="1" fill="#18181b" />
+                      <path
+                        d="M -12.5 -3.4 L -4 -4.6 L 3 -3.2 L 10 -1.9 L 15 -0.9 L 16 0 L 15 0.9 L 10 1.9 L 3 3.2 L -4 4.6 L -12.5 3.4 Z"
+                        fill={driver.teamColour}
+                        stroke="rgba(0,0,0,0.6)"
+                        strokeWidth="1"
+                      />
+                      <circle cx="-1.5" cy="0" r="2" fill="#0b0b0e" />
+                      <rect x="14.2" y="-6" width="2.6" height="12" rx="1" fill="#18181b" />
+                    </g>
+                  </g>
+                  <text
+                    x="0"
+                    y={active ? -19 : -15}
+                    textAnchor="middle"
+                    className="select-none text-[13px] font-black"
+                    fill="#ffffff"
+                    stroke="#050505"
+                    strokeWidth="3.4"
+                    paintOrder="stroke"
+                  >
+                    {driver.acronym}
+                  </text>
+                  {positionLabel ? (
+                    <g transform={`translate(${active ? 15 : 13} ${active ? 16 : 14})`}>
+                      <rect
+                        x={-positionBadgeWidth / 2}
+                        y="-8"
+                        width={positionBadgeWidth}
+                        height="16"
+                        rx="4.5"
+                        fill="#020617"
+                        stroke="#ffffff"
+                        strokeWidth="1.4"
+                      />
+                      <text
+                        x="0"
+                        y="3.5"
+                        textAnchor="middle"
+                        className="select-none text-[10px] font-black"
+                        fill="#ffffff"
+                      >
+                        {positionLabel}
+                      </text>
+                    </g>
+                  ) : null}
+                </>
               ) : (
-                <circle r={imageRadius} fill="#111827" stroke="rgba(255,255,255,0.25)" />
-              )}
-              <circle
-                r={imageRadius}
-                fill="none"
-                stroke="rgba(0,0,0,0.55)"
-                strokeWidth="1.5"
-              />
-              <text
-                x="0"
-                y={active ? -31 : -27}
-                textAnchor="middle"
-                className="select-none text-[18px] font-black"
-                fill="#ffffff"
-                stroke="#050505"
-                strokeWidth="4"
-                paintOrder="stroke"
-              >
-                {driver.acronym}
-              </text>
-              {positionLabel ? (
-                <g transform={`translate(${active ? 17 : 15} ${active ? 18 : 16})`}>
-                  <rect
-                    x={-positionBadgeWidth / 2}
-                    y="-9"
-                    width={positionBadgeWidth}
-                    height="18"
-                    rx="5"
-                    fill="#020617"
+                <>
+                  <circle
+                    r={radius}
+                    fill={driver.teamColour}
                     stroke="#ffffff"
-                    strokeWidth="1.6"
+                    strokeWidth={active ? 4 : 3}
+                  />
+                  {driver.headshotUrl ? (
+                    <image
+                      href={driver.headshotUrl}
+                      x={-imageRadius}
+                      y={-imageRadius}
+                      width={imageRadius * 2}
+                      height={imageRadius * 2}
+                      preserveAspectRatio="xMidYMid slice"
+                      clipPath={`url(#${avatarClipId(driver.driverNumber)})`}
+                    />
+                  ) : (
+                    <circle r={imageRadius} fill="#111827" stroke="rgba(255,255,255,0.25)" />
+                  )}
+                  <circle
+                    r={imageRadius}
+                    fill="none"
+                    stroke="rgba(0,0,0,0.55)"
+                    strokeWidth="1.5"
                   />
                   <text
                     x="0"
-                    y="4"
+                    y={active ? -31 : -27}
                     textAnchor="middle"
-                    className="select-none text-[11px] font-black"
+                    className="select-none text-[18px] font-black"
                     fill="#ffffff"
+                    stroke="#050505"
+                    strokeWidth="4"
+                    paintOrder="stroke"
                   >
-                    {positionLabel}
+                    {driver.acronym}
                   </text>
-                </g>
-              ) : null}
+                  {positionLabel ? (
+                    <g transform={`translate(${active ? 17 : 15} ${active ? 18 : 16})`}>
+                      <rect
+                        x={-positionBadgeWidth / 2}
+                        y="-9"
+                        width={positionBadgeWidth}
+                        height="18"
+                        rx="5"
+                        fill="#020617"
+                        stroke="#ffffff"
+                        strokeWidth="1.6"
+                      />
+                      <text
+                        x="0"
+                        y="4"
+                        textAnchor="middle"
+                        className="select-none text-[11px] font-black"
+                        fill="#ffffff"
+                      >
+                        {positionLabel}
+                      </text>
+                    </g>
+                  ) : null}
+                </>
+              )}
             </g>
           );
         })}
