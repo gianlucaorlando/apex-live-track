@@ -69,11 +69,21 @@ function sameLocalDay(a: Date, b: Date): boolean {
   );
 }
 
+// Il `date_end` di OpenF1 e' l'orario di fine *programmato*: partenze ritardate,
+// bandiere rosse e safety car lo sforano regolarmente (una gara puo' chiudere
+// anche piu' di un'ora dopo). Senza un margine l'app passerebbe in modalita'
+// replay a sessione ancora in corso.
+const LIVE_GRACE_AFTER_END_MS = {
+  race: 150 * 60 * 1000,
+  other: 75 * 60 * 1000,
+} as const;
+
 export function getSessionStatus(
   dateStart: string,
   dateEnd: string,
   isCancelled: boolean,
   now = new Date(),
+  sessionType = "",
 ): Pick<F1Session, "status" | "isLive" | "isToday"> {
   if (isCancelled) {
     return {
@@ -95,7 +105,10 @@ export function getSessionStatus(
   }
 
   const isToday = sameLocalDay(start, now) || sameLocalDay(end, now);
-  const isLive = now >= start && now <= end;
+  const graceMs = /race/i.test(sessionType)
+    ? LIVE_GRACE_AFTER_END_MS.race
+    : LIVE_GRACE_AFTER_END_MS.other;
+  const isLive = now >= start && now.getTime() <= end.getTime() + graceMs;
 
   let status: F1SessionStatus = "replay";
   if (isLive) {
@@ -118,7 +131,13 @@ export function normalizeSession(raw: unknown): F1Session {
   const dateStart = stringValue(record, "date_start");
   const dateEnd = stringValue(record, "date_end");
   const isCancelled = booleanValue(record, "is_cancelled");
-  const status = getSessionStatus(dateStart, dateEnd, isCancelled);
+  const status = getSessionStatus(
+    dateStart,
+    dateEnd,
+    isCancelled,
+    new Date(),
+    stringValue(record, "session_type", ""),
+  );
 
   return {
     sessionKey: numberValue(record, "session_key"),

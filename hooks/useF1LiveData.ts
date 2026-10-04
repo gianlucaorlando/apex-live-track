@@ -923,32 +923,61 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
       });
     }
 
+    // Quando OpenF1 e' lento (10-20 s a richiesta nei weekend di gara) un poll
+    // ogni 3-5 s accumulerebbe richieste sovrapposte, ognuna con una finestra
+    // temporale diversa e quindi non deduplicabile lato server: si salta il giro
+    // finche' il precedente non e' concluso.
+    const inFlight = { location: false, standings: false, raceControl: false };
+
+    function guarded<Args extends unknown[]>(
+      key: keyof typeof inFlight,
+      task: (...args: Args) => Promise<void>,
+    ) {
+      return async (...args: Args) => {
+        if (inFlight[key]) {
+          return;
+        }
+
+        inFlight[key] = true;
+
+        try {
+          await task(...args);
+        } finally {
+          inFlight[key] = false;
+        }
+      };
+    }
+
+    const pollLocation = guarded("location", loadLocation);
+    const pollStandings = guarded("standings", loadStandings);
+    const pollRaceControl = guarded("raceControl", loadRaceControl);
+
     let standingsStartupTimeout: number | undefined;
     let raceControlStartupTimeout: number | undefined;
     const locationPollingEnabled =
       !activeSession.isLive || !tokenConfigured || !streamActive;
     const startupTimeout = window.setTimeout(() => {
       if (locationPollingEnabled) {
-        loadLocation(activeSession.isLive ? 120 : 180);
+        pollLocation(activeSession.isLive ? 120 : 180);
       }
-      standingsStartupTimeout = window.setTimeout(loadStandings, 700);
-      raceControlStartupTimeout = window.setTimeout(loadRaceControl, 1100);
+      standingsStartupTimeout = window.setTimeout(pollStandings, 700);
+      raceControlStartupTimeout = window.setTimeout(pollRaceControl, 1100);
     }, 1300);
     const fastLivePolling = activeSession.isLive && tokenConfigured;
     const pollingMultiplier = pollingBackoff ? (tokenConfigured ? 1.8 : 3) : 1;
 
     const locationInterval = locationPollingEnabled
       ? window.setInterval(
-          loadLocation,
+          pollLocation,
           Math.round((fastLivePolling ? 3000 : 7000) * pollingMultiplier),
         )
       : undefined;
     const standingsInterval = window.setInterval(
-      loadStandings,
+      pollStandings,
       Math.round((fastLivePolling ? 5000 : 7000) * pollingMultiplier),
     );
     const raceControlInterval = window.setInterval(
-      loadRaceControl,
+      pollRaceControl,
       Math.round((fastLivePolling ? 9000 : 18000) * pollingMultiplier),
     );
 

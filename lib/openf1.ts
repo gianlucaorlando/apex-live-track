@@ -35,6 +35,8 @@ import type {
 } from "@/types/f1";
 
 const OPENF1_BASE_URL = "https://api.openf1.org/v1";
+const DEFAULT_OPENF1_TIMEOUT_MS = 20000;
+const NETWORK_RETRY_DELAY_MS = 600;
 
 type QueryValue = string | number | boolean | null | undefined;
 type OpenF1Params = Record<string, QueryValue>;
@@ -212,8 +214,10 @@ export async function fetchOpenF1Array<T>(
     return inflight;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? 8000);
+  // Nei weekend di gara OpenF1 arriva a 10-20 s di latenza per richiesta: un
+  // budget stretto trasforma ogni chiamata in un 504 sistematico.
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_OPENF1_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   const headers: HeadersInit = {
     Accept: "application/json",
   };
@@ -244,11 +248,36 @@ export async function fetchOpenF1Array<T>(
         headers.Authorization = `Bearer ${accessToken}`;
       }
 
-      const response = await fetch(buildUrl(endpoint, params), {
-        cache: "no-store",
-        headers,
-        signal: controller.signal,
-      });
+      // Il timer parte solo adesso: l'attesa dello slot condiviso e l'acquisizione
+      // del token (anch'essa lenta sotto carico) non devono consumare il budget
+      // della richiesta vera e propria.
+      const controller = new AbortController();
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+      }
+      timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      let response: Response;
+
+      try {
+        response = await fetch(buildUrl(endpoint, params), {
+          cache: "no-store",
+          headers,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        // Errori di rete transitori (socket chiuso dal server sotto carico, reset):
+        // un solo retry breve prima di arrendersi. Un timeout vero non si ritenta.
+        const aborted = error instanceof Error && error.name === "AbortError";
+
+        if (!aborted && attempt === 1) {
+          await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAY_MS));
+          continue;
+        }
+
+        throw error;
+      }
+
       const payload: unknown = await response.json().catch(() => null);
       const detail = detailMessage(payload);
 
@@ -332,7 +361,9 @@ export async function fetchOpenF1Array<T>(
 
     throw new OpenF1Error(message, 504);
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
     inflightCache.delete(key);
   }
 }
@@ -475,7 +506,7 @@ export async function fetchLapsForSession(
   const raw = await fetchOpenF1Array<unknown>(
     "laps",
     { session_key: sessionKey },
-    { cacheMs: isLive ? 15 * 1000 : 10 * 60 * 1000, timeoutMs: 10000 },
+    { cacheMs: isLive ? 15 * 1000 : 10 * 60 * 1000, timeoutMs: 20000 },
   );
 
   return raw
@@ -494,7 +525,7 @@ export async function fetchLapsForRequest(
       session_key: session.sessionKey,
       "date_start<": cutoff,
     },
-    { cacheMs: session.isLive ? 12 * 1000 : 45 * 1000, timeoutMs: 10000 },
+    { cacheMs: session.isLive ? 12 * 1000 : 45 * 1000, timeoutMs: 20000 },
   );
 
   return raw
@@ -509,7 +540,7 @@ export async function fetchTyreStintsForSession(
   const raw = await fetchOpenF1Array<unknown>(
     "stints",
     { session_key: sessionKey },
-    { cacheMs: isLive ? 15 * 1000 : 10 * 60 * 1000, timeoutMs: 10000 },
+    { cacheMs: isLive ? 15 * 1000 : 10 * 60 * 1000, timeoutMs: 20000 },
   );
 
   return raw
@@ -583,7 +614,7 @@ export async function fetchRaceControlForRequest(
     },
     {
       cacheMs: session.isLive ? 5000 : 12000,
-      timeoutMs: 10000,
+      timeoutMs: 20000,
     },
   );
 
@@ -679,7 +710,7 @@ export async function fetchFinishLineForSession(
         "date>": new Date(targetTime - 6000).toISOString(),
         "date<": new Date(targetTime + 6000).toISOString(),
       },
-      { cacheMs: isLive ? 30 * 1000 : 10 * 60 * 1000, timeoutMs: 10000 },
+      { cacheMs: isLive ? 30 * 1000 : 10 * 60 * 1000, timeoutMs: 20000 },
     );
     const nearest = nearestLocationForLap(
       rawLocations.map(normalizeLocationPoint),

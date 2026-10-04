@@ -1,5 +1,6 @@
 const OPENF1_TOKEN_URL = "https://api.openf1.org/token";
 const TOKEN_REFRESH_SAFETY_MS = 60 * 1000;
+const TOKEN_REQUEST_TIMEOUT_MS = 20000;
 
 type OpenF1TokenPayload = {
   access_token?: unknown;
@@ -76,14 +77,23 @@ async function fetchOpenF1AccessToken(credentials: {
   body.set("username", credentials.username);
   body.set("password", credentials.password);
 
-  const response = await fetch(OPENF1_TOKEN_URL, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(OPENF1_TOKEN_URL, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+      // Senza timeout un token endpoint lento bloccherebbe *tutte* le richieste
+      // in attesa della stessa promise condivisa.
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    return null;
+  }
 
   if (!response.ok) {
     return null;
