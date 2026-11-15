@@ -106,7 +106,7 @@ export function GapHistoryChart({
         }}
       >
         {sortedLaps.length < 2 ? (
-          <div className="flex h-full items-center justify-center text-[11px] font-semibold text-white/40">
+          <div className="flex h-full items-center justify-center text-[11px] font-semibold text-muted">
             {t(locale, "gapChartEmpty")}
           </div>
         ) : (
@@ -118,7 +118,7 @@ export function GapHistoryChart({
                 x2={svgWidth - PAD_RIGHT}
                 y1={yOf(maxGap * fraction)}
                 y2={yOf(maxGap * fraction)}
-                stroke="#c026d3"
+                stroke="#e4e4e0"
                 strokeOpacity="0.18"
               />
             ))}
@@ -130,7 +130,7 @@ export function GapHistoryChart({
                   x={xOf(lap)}
                   y={height - 4}
                   textAnchor="middle"
-                  className="fill-white/35 font-mono text-[9px]"
+                  className="fill-muted text-[9px]"
                 >
                   {lap}
                 </text>
@@ -151,7 +151,7 @@ export function GapHistoryChart({
                   strokeWidth={highlighted ? 3 : 1.4}
                   strokeOpacity={focus === null || highlighted ? 0.95 : 0.25}
                   strokeLinejoin="round"
-                  style={highlighted ? { filter: `drop-shadow(0 0 4px ${row.teamColour})` } : undefined}
+                  
                 >
                   <title>{row.acronym}</title>
                 </polyline>
@@ -164,13 +164,13 @@ export function GapHistoryChart({
       {/* Asse Y fisso: resta visibile mentre il grafico scorre */}
       {sortedLaps.length >= 2 ? (
         <div
-          className="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-[#0b0420] via-[#0b0420]/90 to-transparent"
+          className="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-white via-white/90 to-transparent"
           style={{ width: AXIS_WIDTH }}
         >
           {Y_TICKS.map((fraction) => (
             <span
               key={fraction}
-              className="absolute right-1.5 -translate-y-1/2 font-mono text-[9px] text-white/40"
+              className="absolute right-1.5 -translate-y-1/2 text-[9px] text-muted"
               style={{ top: yOf(maxGap * fraction) }}
             >
               {fraction === 0 ? "0s" : `+${Math.round(maxGap * fraction)}s`}

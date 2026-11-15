@@ -39,10 +39,10 @@ export function StatusBanner({
   const tone = error ? "red" : rateLimited || noSessionToday ? "amber" : "cyan";
   const toneClass =
     tone === "red"
-      ? "border-red-400/30 bg-red-950/35 text-red-50"
+      ? "border-red-200 bg-red-50 text-red-900"
       : tone === "amber"
-        ? "border-amber-300/30 bg-amber-950/25 text-amber-50"
-        : "border-cyan-300/30 bg-cyan-950/25 text-cyan-50";
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-line bg-white text-ink";
   const Icon = error ? AlertTriangle : rateLimited ? Info : noSessionToday ? Radio : Info;
   const title = error
     ? t(locale, "apiError")
@@ -68,13 +68,13 @@ export function StatusBanner({
             : messages[0] ?? t(locale, "statusPartialBody");
 
   return (
-    <section className={`rounded-lg border px-4 py-3 ${toneClass}`}>
+    <section className={`rounded-md border px-4 py-2.5 ${toneClass}`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 gap-3">
           <Icon className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
           <div className="min-w-0">
             <h2 className="text-sm font-bold">{title}</h2>
-            <p className="mt-1 text-sm opacity-85">{body}</p>
+            <p className="mt-0.5 text-xs opacity-75">{body}</p>
           </div>
         </div>
 
@@ -83,7 +83,7 @@ export function StatusBanner({
             <button
               type="button"
               onClick={onLoadLatest}
-              className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white px-3 py-2 text-sm font-bold text-neutral-950 transition hover:bg-neutral-200"
+              className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-ink/85"
             >
               <RefreshCcw className="h-4 w-4" aria-hidden="true" />
               {t(locale, "loadLatestSession")}
@@ -93,7 +93,7 @@ export function StatusBanner({
             <button
               type="button"
               onClick={onDemo}
-              className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-bold text-white transition hover:bg-white/20"
+              className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-soft"
             >
               <Timer className="h-4 w-4" aria-hidden="true" />
               {t(locale, "historicalDemo")}

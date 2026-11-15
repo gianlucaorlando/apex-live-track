@@ -251,7 +251,7 @@ function ComicPanel({
 
   return (
     <div
-      className={`relative aspect-[16/9] overflow-hidden rounded-md border border-white/10 bg-gradient-to-br ${style.bg}`}
+      className={`relative aspect-[16/9] overflow-hidden rounded-md border border-line bg-gradient-to-br ${style.bg}`}
       role="img"
       aria-label={`${t(locale, "highlightAiBadge")}: ${body}`}
     >
@@ -291,18 +291,18 @@ function ComicPanel({
       />
       <div className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-2xl ${style.glow}`} />
 
-      <div className="absolute left-2 top-2 rounded bg-neutral-950/78 px-2 py-1 text-[0.64rem] font-black uppercase tracking-[0.12em] text-white shadow">
+      <div className="absolute left-2 top-2 rounded bg-white px-2 py-1 text-[0.64rem] font-black uppercase tracking-[0.12em] text-ink shadow">
         {driverLabel}
       </div>
       {eventPhoto ? (
         <div
-          className="absolute bottom-2 left-2 max-w-[55%] truncate rounded bg-neutral-950/72 px-2 py-1 text-[0.56rem] font-bold uppercase tracking-[0.12em] text-white/70 shadow"
+          className="absolute bottom-2 left-2 max-w-[55%] truncate rounded bg-white px-2 py-1 text-[0.56rem] font-bold uppercase tracking-[0.12em] text-ink shadow"
           title={eventPhoto.attribution || eventPhoto.title}
         >
           Wikimedia
         </div>
       ) : null}
-      <div className="absolute bottom-2 right-2 rounded bg-white px-2 py-1 text-[0.62rem] font-black uppercase tracking-[0.14em] text-neutral-950 shadow">
+      <div className="absolute bottom-2 right-2 rounded bg-white px-2 py-1 text-[0.62rem] font-black uppercase tracking-[0.14em] text-muted shadow">
         {t(locale, "highlightAiBadge")}
       </div>
     </div>
@@ -321,25 +321,25 @@ export function RaceHighlights({
 
   return (
     <aside
-      className="flex h-full min-h-0 flex-col panel-neon rounded-xl overflow-hidden"
+      className="flex h-full min-h-0 flex-col panel rounded-xl overflow-hidden"
       aria-label={t(locale, "highlightsAria")}
       data-race-highlights
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-cyan-200" aria-hidden="true" />
-          <h2 className="text-sm font-black uppercase tracking-[0.16em] text-white">
+          <Sparkles className="h-4 w-4 text-ink" aria-hidden="true" />
+          <h2 className="text-sm font-black uppercase tracking-[0.16em] text-ink">
             {t(locale, "highlights")}
           </h2>
         </div>
-        <span className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-neutral-300">
+        <span className="rounded-md bg-soft px-2 py-1 text-xs font-semibold text-muted">
           {highlights.length || 0}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {highlights.length === 0 ? (
-          <div className="grid h-full min-h-0 place-items-center px-6 text-center text-sm text-neutral-400">
+          <div className="grid h-full min-h-0 place-items-center px-6 text-center text-sm text-muted">
             {t(locale, "highlightsEmpty")}
           </div>
         ) : (
@@ -365,10 +365,10 @@ export function RaceHighlights({
                       onSelectDriver(targetDriverNumber);
                     }
                   }}
-                  className={`grid w-full cursor-pointer gap-3 rounded-lg border bg-white/[0.045] p-2 text-left transition hover:border-white/20 hover:bg-white/[0.085] focus:outline-none focus:ring-2 focus:ring-white/35 ${
+                  className={`grid w-full cursor-pointer gap-3 rounded-lg border bg-soft p-2 text-left transition hover:border-line hover:bg-soft focus:outline-none focus:ring-2 focus:ring-ink/30 ${
                     open
                       ? "grid-cols-1 border-cyan-200/35 bg-cyan-300/[0.075]"
-                      : "grid-cols-[7.6rem_minmax(0,1fr)] border-white/8"
+                      : "grid-cols-[7.6rem_minmax(0,1fr)] border-line"
                   }`}
                 >
                   <ComicPanel
@@ -380,7 +380,7 @@ export function RaceHighlights({
                   />
 
                   <div className={`min-w-0 self-center ${open ? "px-1 pb-1" : ""}`}>
-                    <div className="flex flex-wrap items-center gap-1.5 text-[0.64rem] font-bold uppercase tracking-[0.12em] text-neutral-400">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[0.64rem] font-bold uppercase tracking-[0.12em] text-muted">
                       <span>{formatRaceControlTime(message.date, locale)}</span>
                       {message.lapNumber !== null ? (
                         <span>
@@ -395,7 +395,7 @@ export function RaceHighlights({
                       ) : null}
                     </div>
 
-                    <p className={`mt-1 text-sm font-black leading-snug text-white ${
+                    <p className={`mt-1 text-sm font-black leading-snug text-ink ${
                       open ? "" : "max-h-12 overflow-hidden"
                     }`}>
                       {body}
@@ -408,7 +408,7 @@ export function RaceHighlights({
                         <Icon className="h-3 w-3" aria-hidden="true" />
                         {raceControlCategoryLabel(message, locale)}
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[0.64rem] font-semibold uppercase tracking-[0.12em] text-neutral-500">
+                      <span className="inline-flex items-center gap-1 text-[0.64rem] font-semibold uppercase tracking-[0.12em] text-muted">
                         <Camera className="h-3 w-3" aria-hidden="true" />
                         {t(locale, "highlightMoment")}
                       </span>

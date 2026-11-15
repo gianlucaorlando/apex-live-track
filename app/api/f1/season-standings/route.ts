@@ -24,7 +24,7 @@ interface CacheEntry {
 }
 
 const JOLPICA_BASE_URL = "https://api.jolpi.ca/ergast/f1";
-const SEASON_STANDINGS_CACHE_VERSION = "v2";
+const SEASON_STANDINGS_CACHE_VERSION = "v3";
 
 const globalCache = globalThis as typeof globalThis & {
   __f1LiveTrackSeasonStandingsCache?: Map<string, CacheEntry>;
@@ -126,7 +126,22 @@ function parseConstructorPointsAvailability(
     return Boolean(stringValue(sprint, "date"));
   }).length;
 
-  return constructorPointsAvailabilityFor(races.length, sprintCount);
+  // Una sessione conta come corsa quando la sua data/ora di inizio e' passata.
+  const now = Date.now();
+  const isFuture = (record: JsonRecord) => {
+    const date = stringValue(record, "date");
+    if (!date) return false;
+    const startsAt = new Date(`${date}T${stringValue(record, "time") ?? "00:00:00Z"}`).getTime();
+    return Number.isFinite(startsAt) && startsAt > now;
+  };
+  const racesRemaining = races.filter((rawRace) => isFuture(asRecord(rawRace))).length;
+  const sprintsRemaining = races.filter((rawRace) => isFuture(asRecord(asRecord(rawRace).Sprint))).length;
+
+  return {
+    ...constructorPointsAvailabilityFor(races.length, sprintCount),
+    racesRemaining,
+    sprintsRemaining,
+  };
 }
 
 function parseDriverStandings(payload: unknown): {

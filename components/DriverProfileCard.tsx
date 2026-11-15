@@ -118,14 +118,14 @@ export function DriverProfileCard({
 
   return (
     <aside
-      className="absolute bottom-4 right-4 top-24 z-40 flex w-[22rem] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-lg border border-white/15 bg-slate-950/92 shadow-2xl shadow-black/45 backdrop-blur-xl"
+      className="absolute bottom-4 right-4 top-24 z-40 flex w-[22rem] max-w-[calc(100%-2rem)] flex-col overflow-hidden rounded-lg border border-line bg-white shadow-sm"
       data-driver-profile-card
     >
       <div className="h-1.5 flex-none" style={{ backgroundColor: driver.teamColour }} />
       <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
         <div className="flex items-start gap-3">
           <div
-            className="grid h-16 w-16 flex-none place-items-center overflow-hidden rounded-lg border-2 bg-neutral-900"
+            className="grid h-16 w-16 flex-none place-items-center overflow-hidden rounded-lg border-2 bg-white"
             style={{ borderColor: driver.teamColour }}
           >
             {driver.headshotUrl ? (
@@ -135,15 +135,15 @@ export function DriverProfileCard({
                 className="h-full w-full object-cover"
               />
             ) : (
-              <span className="text-lg font-black text-white">{driver.acronym}</span>
+              <span className="text-lg font-black text-ink">{driver.acronym}</span>
             )}
           </div>
 
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
-                <h3 className="truncate text-lg font-black text-white">{driver.fullName}</h3>
-                <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-white/55">
+                <h3 className="truncate text-lg font-black text-ink">{driver.fullName}</h3>
+                <div className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
                   #{driver.driverNumber} · {driver.acronym}
                 </div>
               </div>
@@ -151,7 +151,7 @@ export function DriverProfileCard({
                 type="button"
                 onClick={onClose}
                 title={t(locale, "closeDriverCard")}
-                className="grid h-8 w-8 flex-none place-items-center rounded-md border border-white/10 bg-white/5 text-white transition hover:bg-white/12"
+                className="grid h-8 w-8 flex-none place-items-center rounded-md border border-line bg-soft text-ink transition hover:bg-line/70"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -160,64 +160,64 @@ export function DriverProfileCard({
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
-            <div className="text-white/45">{t(locale, "position")}</div>
-            <div className="mt-1 text-lg font-black text-white">
+          <div className="rounded-md border border-line bg-soft p-2">
+            <div className="text-muted">{t(locale, "position")}</div>
+            <div className="mt-1 text-lg font-black text-ink">
               {driver.position ? `P${driver.position}` : "P-"}
             </div>
-            <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-cyan-100/70">
+            <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-ink">
               {t(locale, "lapProgress")} {lapValue}
             </div>
           </div>
-          <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
-            <div className="flex items-center justify-between gap-2 text-white/45">
+          <div className="rounded-md border border-line bg-soft p-2">
+            <div className="flex items-center justify-between gap-2 text-muted">
               <span>{t(locale, "tyre")}</span>
               <span
                 className="h-2.5 w-2.5 rounded-full"
                 style={{ backgroundColor: tyreColor }}
               />
             </div>
-            <div className="mt-1 text-lg font-black text-white">
+            <div className="mt-1 text-lg font-black text-ink">
               {driver.tyre ? tyreCompound(locale, driver.tyre.compound) : "n.d."}
             </div>
             {driver.tyre ? (
-              <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-white/45">
+              <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-muted">
                 {t(locale, "tyreAge")} {driver.tyre.ageLaps ?? "-"} ·{" "}
                 {t(locale, "tyreStint")} {driver.tyre.stintNumber}
               </div>
             ) : null}
           </div>
-          <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
-            <div className="text-white/45">{t(locale, "f1Wins")}</div>
-            <div className="mt-1 flex items-center gap-1.5 text-lg font-black text-white">
-              <Trophy className="h-4 w-4 text-amber-300" aria-hidden="true" />
+          <div className="rounded-md border border-line bg-soft p-2">
+            <div className="text-muted">{t(locale, "f1Wins")}</div>
+            <div className="mt-1 flex items-center gap-1.5 text-lg font-black text-ink">
+              <Trophy className="h-4 w-4 text-amber-600" aria-hidden="true" />
               {loading ? "..." : profile?.wins ?? "n.d."}
             </div>
           </div>
           {!loading && profile?.worldChampionships && profile.worldChampionships > 0 ? (
             <div className="rounded-md border border-amber-300/20 bg-amber-300/10 p-2">
-              <div className="text-amber-100/60">{t(locale, "f1WorldTitles")}</div>
-              <div className="mt-1 flex items-center gap-1.5 text-lg font-black text-amber-50">
-                <Trophy className="h-4 w-4 text-amber-300" aria-hidden="true" />
+              <div className="text-ink">{t(locale, "f1WorldTitles")}</div>
+              <div className="mt-1 flex items-center gap-1.5 text-lg font-black text-ink">
+                <Trophy className="h-4 w-4 text-amber-600" aria-hidden="true" />
                 {profile.worldChampionships}
               </div>
             </div>
           ) : null}
-          <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
-            <div className="text-white/45">{t(locale, "team")}</div>
-            <div className="mt-1 truncate font-bold text-white">{driver.teamName}</div>
+          <div className="rounded-md border border-line bg-soft p-2">
+            <div className="text-muted">{t(locale, "team")}</div>
+            <div className="mt-1 truncate font-bold text-ink">{driver.teamName}</div>
           </div>
-          <div className="rounded-md border border-white/10 bg-white/[0.06] p-2">
-            <div className="text-white/45">{t(locale, "gapInterval")}</div>
-            <div className="mt-1 truncate font-bold text-white">
+          <div className="rounded-md border border-line bg-soft p-2">
+            <div className="text-muted">{t(locale, "gapInterval")}</div>
+            <div className="mt-1 truncate font-bold text-ink">
               {driver.gap} / {driver.interval}
             </div>
           </div>
         </div>
 
-        <div className="mt-4 rounded-lg border border-white/10 bg-black/22 p-3">
+        <div className="mt-4 rounded-lg border border-line bg-white p-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-black uppercase tracking-[0.14em] text-white/60">
+            <div className="text-xs font-black uppercase tracking-[0.14em] text-muted">
               {t(locale, "wikipedia")}
             </div>
             {profile?.pageUrl ? (
@@ -225,7 +225,7 @@ export function DriverProfileCard({
                 href={profile.pageUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-white transition hover:bg-white/12"
+                className="inline-flex items-center gap-1.5 rounded-md border border-line bg-soft px-2 py-1 text-xs font-bold text-ink transition hover:bg-line/70"
               >
                 {t(locale, "open")}
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
@@ -234,11 +234,11 @@ export function DriverProfileCard({
           </div>
 
           {loading ? (
-            <div className="mt-3 text-sm font-semibold text-white/70">
+            <div className="mt-3 text-sm font-semibold text-ink">
               {t(locale, "profileLoading")}
             </div>
           ) : error ? (
-            <div className="mt-3 text-sm font-semibold text-amber-100">{error}</div>
+            <div className="mt-3 text-sm font-semibold text-ink">{error}</div>
           ) : profile ? (
             <div className="mt-3 flex gap-3">
               {profile.thumbnailUrl ? (
@@ -249,25 +249,25 @@ export function DriverProfileCard({
                 />
               ) : null}
               <div className="min-w-0">
-                <div className="text-sm font-black text-white">{profile.title}</div>
+                <div className="text-sm font-black text-ink">{profile.title}</div>
                 {profile.description ? (
-                  <div className="mt-0.5 text-xs font-semibold text-white/48">
+                  <div className="mt-0.5 text-xs font-semibold text-muted">
                     {profile.description}
                   </div>
                 ) : null}
-                <p className="mt-2 text-xs leading-relaxed text-white/72">
+                <p className="mt-2 text-xs leading-relaxed text-ink">
                   {shortExtract(profile)}
                 </p>
               </div>
             </div>
           ) : (
-            <div className="mt-3 text-sm font-semibold text-white/70">
+            <div className="mt-3 text-sm font-semibold text-ink">
               {t(locale, "profileMissing")}
             </div>
           )}
         </div>
 
-        <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/38">
+        <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
           {profile?.attribution ?? t(locale, "wikiAttribution")}
         </div>
       </div>

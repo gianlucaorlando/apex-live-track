@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, CalendarDays, LineChart, Map, Trophy, Zap } from "lucide-react";
+import { ArrowRightLeft, CalendarDays, LineChart, Map, Trophy } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
 import { GapHistoryChart } from "@/components/GapHistoryChart";
 import { GapLadder } from "@/components/GapLadder";
@@ -15,12 +15,10 @@ import { SessionHeader } from "@/components/SessionHeader";
 import { SeasonStandings } from "@/components/SeasonStandings";
 import { StatusBanner } from "@/components/StatusBanner";
 import { TrackMap } from "@/components/TrackMap";
-import { WeatherBackdrop } from "@/components/WeatherBackdrop";
 import { useF1LiveData } from "@/hooks/useF1LiveData";
 import { useGapHistory } from "@/hooks/useGapHistory";
 import { useSessionInsights } from "@/hooks/useSessionInsights";
 import { DEFAULT_LOCALE, normalizeLocale, t, type Locale } from "@/lib/i18n";
-import type { CircuitPhoto, CircuitPhotoApiResponse } from "@/types/circuit";
 import type { RaceWeather, WeatherApiResponse } from "@/types/weather";
 
 interface DashboardProps {
@@ -30,9 +28,8 @@ interface DashboardProps {
 type DashboardView = "track" | "calendar" | "season-standings";
 
 // Visualizzazione della vista "Tracciato": corsia dei distacchi (fluida, basata su
-// intervalli scalari), mappa del circuito (posizioni x/y, ~3,7 Hz) oppure la stessa
-// mappa con la skin "game" in stile racing game 2D dall'alto.
-type TrackViewMode = "ladder" | "chart" | "neon";
+// intervalli scalari), grafico dei distacchi per giro oppure mappa del circuito.
+type TrackViewMode = "ladder" | "chart" | "map";
 
 const TRACK_VIEW_MODE_STORAGE_KEY = "f1-live-track-view-mode";
 
@@ -46,12 +43,12 @@ function TrackViewToggle({ mode, locale, onChange }: TrackViewToggleProps) {
   const options: { mode: TrackViewMode; label: string; icon: typeof Map }[] = [
     { mode: "ladder", label: t(locale, "viewModeLadder"), icon: ArrowRightLeft },
     { mode: "chart", label: t(locale, "viewModeChart"), icon: LineChart },
-    { mode: "neon", label: t(locale, "viewModeNeon"), icon: Zap },
+    { mode: "map", label: t(locale, "viewModeMap"), icon: Map },
   ];
 
   return (
     <nav
-      className="flex flex-none items-center gap-1 self-start rounded-lg border border-white/10 bg-neutral-950/85 p-0.5"
+      className="flex flex-none items-center overflow-hidden rounded-md border border-line bg-white"
       aria-label={t(locale, "viewModeAria")}
     >
       {options.map((option) => {
@@ -63,10 +60,8 @@ function TrackViewToggle({ mode, locale, onChange }: TrackViewToggleProps) {
             key={option.mode}
             type="button"
             onClick={() => onChange(option.mode)}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold transition ${
-              active
-                ? "bg-white text-neutral-950"
-                : "text-neutral-300 hover:bg-white/10 hover:text-white"
+            className={`inline-flex h-7 items-center gap-1.5 border-r border-line px-3 font-display text-xs font-semibold transition last:border-r-0 ${
+              active ? "bg-ink text-white" : "text-muted hover:bg-soft hover:text-ink"
             }`}
             aria-pressed={active}
           >
@@ -85,7 +80,7 @@ interface ViewTabsProps {
   onChange: (view: DashboardView) => void;
 }
 
-function ViewTabs({ activeView, locale, onChange }: ViewTabsProps) {
+function ViewTabs({ activeView, locale, onChange, lapLabel }: ViewTabsProps & { lapLabel: string | null }) {
   const tabs: {
     view: DashboardView;
     label: string;
@@ -98,7 +93,7 @@ function ViewTabs({ activeView, locale, onChange }: ViewTabsProps) {
 
   return (
     <nav
-      className="flex flex-none items-center gap-1 self-start rounded-lg border border-white/10 bg-neutral-950/85 p-1"
+      className="flex h-11 flex-none items-end gap-7 border-b border-line bg-white px-4 sm:px-6"
       aria-label={t(locale, "viewTabsAria")}
     >
       {tabs.map((tab) => {
@@ -110,10 +105,8 @@ function ViewTabs({ activeView, locale, onChange }: ViewTabsProps) {
             key={tab.view}
             type="button"
             onClick={() => onChange(tab.view)}
-            className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold transition ${
-              active
-                ? "bg-white text-neutral-950"
-                : "text-neutral-300 hover:bg-white/10 hover:text-white"
+            className={`inline-flex items-center gap-2 border-b-[3px] pb-2.5 font-display text-[13px] font-bold uppercase tracking-[0.06em] transition ${
+              active ? "border-f1red text-ink" : "border-transparent text-muted hover:text-ink"
             }`}
             aria-pressed={active}
           >
@@ -122,6 +115,9 @@ function ViewTabs({ activeView, locale, onChange }: ViewTabsProps) {
           </button>
         );
       })}
+      {lapLabel ? (
+        <span className="ml-auto pb-2.5 font-display text-[13px] font-semibold text-muted">{lapLabel}</span>
+      ) : null}
     </nav>
   );
 }
@@ -136,7 +132,6 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   const [hoveredDriver, setHoveredDriver] = useState<number | null>(null);
   const [selectedDriverNumber, setSelectedDriverNumber] = useState<number | null>(null);
   const [weather, setWeather] = useState<RaceWeather | null>(null);
-  const [circuitPhoto, setCircuitPhoto] = useState<CircuitPhoto | null>(null);
   const liveData = useF1LiveData(demo, locale);
   const loadingMessage = demo
     ? t(locale, "loadingDemoReplay")
@@ -163,6 +158,14 @@ export function Dashboard({ initialDemo }: DashboardProps) {
     };
   }, [liveData.standings]);
 
+  // Link diretti: ?view=calendar | season-standings apre subito quella sezione.
+  useEffect(() => {
+    const view = new URLSearchParams(window.location.search).get("view");
+    if (view === "calendar" || view === "season-standings" || view === "track") {
+      setActiveView(view);
+    }
+  }, []);
+
   useEffect(() => {
     setLocale(normalizeLocale(window.localStorage.getItem("f1-live-track-locale")));
     setLocaleHydrated(true);
@@ -171,7 +174,9 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   useEffect(() => {
     const stored = window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
 
-    if (stored === "ladder" || stored === "chart" || stored === "neon") {
+    if (stored === "neon") {
+      setTrackViewMode("map");
+    } else if (stored === "ladder" || stored === "chart" || stored === "map") {
       setTrackViewMode(stored);
     }
 
@@ -240,52 +245,9 @@ export function Dashboard({ initialDemo }: DashboardProps) {
     };
   }, [liveData.meeting, locale]);
 
-  useEffect(() => {
-    const meeting = liveData.meeting;
-
-    if (!meeting) {
-      setCircuitPhoto(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const params = new URLSearchParams({
-      meeting: meeting.meetingName,
-      location: meeting.location || meeting.circuitShortName,
-      circuit: meeting.circuitShortName,
-      country: meeting.countryName,
-    });
-
-    async function loadCircuitPhoto() {
-      try {
-        const response = await fetch(`/api/circuit-photo?${params.toString()}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const payload = (await response.json().catch(() => null)) as
-          | CircuitPhotoApiResponse
-          | null;
-
-        if (!controller.signal.aborted) {
-          setCircuitPhoto(response.ok ? payload?.data ?? null : null);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setCircuitPhoto(null);
-        }
-      }
-    }
-
-    loadCircuitPhoto();
-
-    return () => {
-      controller.abort();
-    };
-  }, [liveData.meeting]);
-
   if (liveData.loading && !liveData.session) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-white">
+      <main className="min-h-screen bg-page text-ink">
         <SessionHeader
           session={null}
           meeting={null}
@@ -306,7 +268,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
 
   if (liveData.error && !liveData.session) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-white">
+      <main className="min-h-screen bg-page text-ink">
         <SessionHeader
           session={null}
           meeting={null}
@@ -326,8 +288,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   }
 
   return (
-    <main className="relative h-screen min-h-screen overflow-hidden bg-neutral-950 text-white">
-      <WeatherBackdrop weather={weather} circuitPhoto={circuitPhoto} locale={locale} />
+    <main className="relative h-screen min-h-screen overflow-hidden bg-page text-ink">
       <div className="relative z-10 flex h-screen min-h-0 flex-col">
         <SessionHeader
           session={liveData.session}
@@ -341,7 +302,18 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           onLocaleChange={setLocale}
         />
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4 lg:p-4">
+        <ViewTabs
+          activeView={activeView}
+          locale={locale}
+          onChange={setActiveView}
+          lapLabel={
+            lapSummary.current
+              ? `${t(locale, "lapProgress")} ${lapSummary.current} / ${lapSummary.total ?? "-"}`
+              : null
+          }
+        />
+
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4">
           <StatusBanner
             session={liveData.session}
             demo={demo}
@@ -355,10 +327,8 @@ export function Dashboard({ initialDemo }: DashboardProps) {
             onDemo={() => setDemo(true)}
           />
 
-          <ViewTabs activeView={activeView} locale={locale} onChange={setActiveView} />
-
           {activeView === "track" ? (
-            <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(12rem,0.58fr)] gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(34rem,0.54fr)] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_40rem]">
+            <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(12rem,0.58fr)] gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(46rem,0.95fr)] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_56rem]">
               <div className="relative flex min-h-0 flex-col gap-2">
                 {telemetryDriver ? (
                   <div className="pointer-events-none absolute bottom-3 left-3 z-[80]">
@@ -391,10 +361,10 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                     />
                   </div>
                 ) : trackViewMode === "chart" ? (
-                  <section className="panel-neon flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
-                    <div className="flex flex-none items-center gap-2 border-b border-white/10 px-4 py-3">
-                      <LineChart className="h-4 w-4 text-cyan-300" aria-hidden="true" />
-                      <h2 className="panel-neon-title text-sm font-black uppercase italic tracking-[0.18em]">
+                  <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
+                    <div className="flex flex-none items-center gap-2 border-b border-line px-4 py-3">
+                      <LineChart className="h-4 w-4 text-cyan-600" aria-hidden="true" />
+                      <h2 className="panel-title text-sm font-black uppercase tracking-[0.18em]">
                         {t(locale, "gapChartTitle")}
                       </h2>
                     </div>
@@ -422,14 +392,14 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                       hoveredDriver={hoveredDriver}
                       selectedDriverNumber={selectedDriverNumber}
                       locale={locale}
-                      skin="neon"
+                      skin="classic"
                       onHoverDriver={setHoveredDriver}
                       onSelectDriver={setSelectedDriverNumber}
                     />
                   </div>
                 )}
               </div>
-              <div className="grid min-h-0 grid-cols-3 gap-3 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)_minmax(8rem,0.7fr)]">
+              <div className="grid min-h-0 grid-cols-3 gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)_minmax(8rem,0.62fr)]">
                 <LiveStandings
                   rows={liveData.standings}
                   hoveredDriver={hoveredDriver}

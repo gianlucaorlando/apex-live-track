@@ -138,9 +138,9 @@ function rainState(weather: RaceWeather | null, locale: Locale): {
       label: storm ? t(locale, "storm") : t(locale, "heavyRain"),
       detail: `${weatherNumber(amount, 1)} mm`,
       level: 1,
-      panelClass: "border-cyan-200/55 bg-cyan-950/80 text-cyan-50 shadow-cyan-950/40",
-      barClass: "bg-cyan-200",
-      trackClass: "border-cyan-200/45 shadow-cyan-950/40",
+      panelClass: "border-sky-300 bg-sky-50 text-sky-950",
+      barClass: "bg-sky-600",
+      trackClass: "border-line",
     };
   }
 
@@ -149,9 +149,9 @@ function rainState(weather: RaceWeather | null, locale: Locale): {
       label: t(locale, "mediumRain"),
       detail: `${weatherNumber(amount, 1)} mm`,
       level: 0.72,
-      panelClass: "border-sky-200/45 bg-sky-950/75 text-sky-50 shadow-sky-950/35",
-      barClass: "bg-sky-200",
-      trackClass: "border-sky-200/35 shadow-sky-950/35",
+      panelClass: "border-sky-200 bg-sky-50 text-sky-950",
+      barClass: "bg-sky-500",
+      trackClass: "border-line",
     };
   }
 
@@ -160,9 +160,9 @@ function rainState(weather: RaceWeather | null, locale: Locale): {
       label: t(locale, "lightRain"),
       detail: `${weatherNumber(amount, 1)} mm`,
       level: 0.38,
-      panelClass: "border-teal-200/40 bg-teal-950/70 text-teal-50 shadow-teal-950/30",
-      barClass: "bg-teal-200",
-      trackClass: "border-teal-200/30 shadow-teal-950/30",
+      panelClass: "border-teal-200 bg-teal-50 text-teal-950",
+      barClass: "bg-teal-500",
+      trackClass: "border-line",
     };
   }
 
@@ -170,9 +170,9 @@ function rainState(weather: RaceWeather | null, locale: Locale): {
     label: t(locale, "dryTrack"),
     detail: weather?.description ?? t(locale, "weatherWaiting"),
     level: 0.04,
-    panelClass: "border-white/15 bg-neutral-950/70 text-neutral-100 shadow-black/20",
-    barClass: "bg-emerald-300",
-    trackClass: "border-white/15 shadow-black/20",
+    panelClass: "border-line bg-white text-ink",
+    barClass: "bg-timing-green",
+    trackClass: "border-line",
   };
 }
 
@@ -205,23 +205,23 @@ function WeatherMiniBar({
 
   return (
     <div
-      className={`max-w-[44rem] min-w-0 flex-1 rounded-lg border px-3 py-2 text-xs font-semibold shadow-2xl backdrop-blur-md sm:flex-none ${state.panelClass}`}
+      className={`max-w-[44rem] min-w-0 flex-1 rounded-lg border px-3 py-2 text-xs font-semibold shadow-sm sm:flex-none ${state.panelClass}`}
       data-weather-mini-bar
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex min-w-0 items-center gap-2 border-r border-white/15 pr-3">
-          <span className="grid h-8 w-8 flex-none place-items-center rounded-md bg-white/12">
+        <div className="flex min-w-0 items-center gap-2 border-r border-line pr-3">
+          <span className="grid h-8 w-8 flex-none place-items-center rounded-md bg-line/70">
             {weatherIcon(weather?.condition)}
           </span>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-black text-white">{state.label}</span>
-              <span className="hidden text-white/70 sm:inline">{state.detail}</span>
-              <span className="rounded bg-white/12 px-1.5 py-0.5 text-[10px] uppercase text-white/75">
+              <span className="truncate text-sm font-black text-ink">{state.label}</span>
+              <span className="hidden text-ink sm:inline">{state.detail}</span>
+              <span className="rounded bg-line/70 px-1.5 py-0.5 text-[10px] uppercase text-ink">
                 {weather ? formatTime(weather.observedAt, locale) : "--"}
               </span>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/15">
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line/70">
               <div
                 className={`h-full rounded-full ${state.barClass}`}
                 style={{ width: rainPercent }}
@@ -255,7 +255,7 @@ function WeatherMiniBar({
       </div>
 
       {weather ? (
-        <div className="mt-1 truncate text-[10px] uppercase tracking-[0.12em] text-white/55">
+        <div className="mt-1 truncate text-[10px] uppercase tracking-[0.12em] text-muted">
           {weatherPlace(locale, weather.locationName, weather.country)} · {t(locale, "rainFocus")}{" "}
           {weatherNumber(rain, 1)} mm
         </div>
@@ -281,17 +281,13 @@ function WeatherTrackLayer({ weather }: { weather: RaceWeather | null }) {
     >
       <div
         className={`absolute inset-0 ${
-          wet
-            ? "bg-cyan-400/12 mix-blend-screen"
-            : cloudy
-              ? "bg-slate-300/8 mix-blend-screen"
-              : "bg-amber-200/5 mix-blend-screen"
+          wet ? "bg-sky-500/5" : cloudy ? "bg-slate-500/[0.03]" : ""
         }`}
       />
       {wet ? (
         <>
-          <div className="absolute inset-0 opacity-55 mix-blend-screen [background-image:repeating-linear-gradient(112deg,rgba(186,230,253,0.42)_0_1px,transparent_1px_18px)]" />
-          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-cyan-200/18 to-transparent" />
+          <div className="absolute inset-0 opacity-60 [background-image:repeating-linear-gradient(112deg,rgba(44,110,213,0.14)_0_1px,transparent_1px_18px)]" />
+          <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-sky-200/25 to-transparent" />
         </>
       ) : null}
     </div>
@@ -2111,12 +2107,11 @@ export function TrackMap({
 
   return (
     <section
-      className={`relative h-full min-h-0 overflow-hidden rounded-lg border bg-black/18 shadow-2xl backdrop-blur-[2px] ${weatherState.trackClass}`}
+      className={`relative h-full min-h-0 overflow-hidden rounded-lg border bg-white shadow-sm ${weatherState.trackClass}`}
     >
-      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_45%,rgba(255,255,255,0.06),transparent_34rem),linear-gradient(180deg,rgba(0,0,0,0.20),rgba(0,0,0,0.42))]" />
       <div className="absolute left-4 right-4 top-4 z-30 flex items-start justify-between gap-3">
-        <div className="flex flex-none items-center gap-2 rounded-md border border-white/10 bg-neutral-950/70 px-3 py-2 text-xs font-semibold text-neutral-200 backdrop-blur">
-          <MapIcon className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+        <div className="flex flex-none items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-ink">
+          <MapIcon className="h-4 w-4 text-emerald-600" aria-hidden="true" />
           {circuitName(locale, meeting?.circuitShortName)}
         </div>
         <WeatherMiniBar weather={weather} locale={locale} />
@@ -2213,8 +2208,8 @@ export function TrackMap({
           </>
         ) : (
           <>
-            <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="rgba(0,0,0,0.18)" />
-            <g opacity="0.13">
+            <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="#ffffff" />
+            <g opacity="0.5">
               {Array.from({ length: 12 }).map((_, index) => (
                 <line
                   key={`grid-x-${index}`}
@@ -2222,7 +2217,7 @@ export function TrackMap({
                   y1="0"
                   x2={(SVG_WIDTH / 12) * index}
                   y2={SVG_HEIGHT}
-                  stroke="#ffffff"
+                  stroke="#efefec"
                   strokeWidth="1"
                 />
               ))}
@@ -2233,7 +2228,7 @@ export function TrackMap({
                   y1={(SVG_HEIGHT / 8) * index}
                   x2={SVG_WIDTH}
                   y2={(SVG_HEIGHT / 8) * index}
-                  stroke="#ffffff"
+                  stroke="#efefec"
                   strokeWidth="1"
                 />
               ))}
@@ -2355,29 +2350,18 @@ export function TrackMap({
             <polyline
               points={polylinePoints}
               fill="none"
-              stroke="#000000"
+              stroke="#deded9"
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth="28"
-              opacity="0.55"
+              strokeWidth="24"
             />
             <polyline
               points={polylinePoints}
               fill="none"
-              stroke="#f4f4f5"
+              stroke="#15151e"
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeWidth="13"
-            />
-            <polyline
-              points={polylinePoints}
-              fill="none"
-              stroke="#ef4444"
-              strokeDasharray="18 20"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="3"
-              opacity="0.9"
+              strokeWidth="4"
             />
           </g>
         ) : null}
@@ -2434,8 +2418,8 @@ export function TrackMap({
               y={baseData.finishLine.y - 28}
               textAnchor="middle"
               className="select-none text-[15px] font-black"
-              fill="#ffffff"
-              stroke="#020617"
+              fill="#15151e"
+              stroke="#ffffff"
               strokeWidth="4"
               paintOrder="stroke"
             >
@@ -2657,8 +2641,8 @@ export function TrackMap({
                     y={active ? -31 : -27}
                     textAnchor="middle"
                     className="select-none text-[18px] font-black"
-                    fill="#ffffff"
-                    stroke="#050505"
+                    fill="#15151e"
+                    stroke="#ffffff"
                     strokeWidth="4"
                     paintOrder="stroke"
                   >
@@ -2705,18 +2689,18 @@ export function TrackMap({
       ) : null}
 
       {!baseData.hasPoints ? (
-        <div className="absolute inset-x-4 bottom-4 z-30 rounded-lg border border-white/10 bg-neutral-950/74 p-4 text-sm text-neutral-300 backdrop-blur">
-          <div className="flex items-center gap-2 font-semibold text-white">
-            <MousePointer2 className="h-4 w-4 text-cyan-300" aria-hidden="true" />
+        <div className="absolute inset-x-4 bottom-4 z-30 rounded-lg border border-line bg-white p-4 text-sm text-muted">
+          <div className="flex items-center gap-2 font-semibold text-ink">
+            <MousePointer2 className="h-4 w-4 text-cyan-600" aria-hidden="true" />
             {t(locale, "trackUnavailable")}
           </div>
         </div>
       ) : !hasTrack ? (
-        <div className="absolute bottom-4 left-4 z-30 rounded-md border border-amber-300/30 bg-amber-950/30 px-3 py-2 text-xs font-semibold text-amber-50">
+        <div className="absolute bottom-4 left-4 z-30 rounded-md border border-amber-300/30 bg-amber-950/30 px-3 py-2 text-xs font-semibold text-ink">
           {t(locale, "trackReconstructed")}
         </div>
       ) : (
-        <div className="absolute bottom-4 left-4 z-30 rounded-md border border-emerald-300/25 bg-emerald-950/25 px-3 py-2 text-xs font-semibold text-emerald-50">
+        <div className="absolute bottom-4 left-4 z-30 rounded-md border border-emerald-300/25 bg-emerald-950/25 px-3 py-2 text-xs font-semibold text-ink">
           {t(locale, "trackReconstructed")}
         </div>
       )}

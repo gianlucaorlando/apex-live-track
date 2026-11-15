@@ -35,6 +35,9 @@ export interface SeasonConstructorPointsAvailability {
   maxSingleConstructorPoints: number;
   maxGrandPrixPointsPerConstructor: number;
   maxSprintPointsPerConstructor: number;
+  /** Gare e sprint non ancora corse (da calendario), se note. */
+  racesRemaining?: number;
+  sprintsRemaining?: number;
 }
 
 export interface SeasonStandingsPayload {

@@ -1,343 +1,65 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CircleAlert,
-  ExternalLink,
-  Flag,
-  Loader2,
-  Medal,
-  RefreshCcw,
-  Shield,
-  Trophy,
-  UsersRound,
-} from "lucide-react";
+import { CircleAlert, Loader2, RefreshCcw } from "lucide-react";
+import { ChampionsBanner } from "@/components/ChampionsBanner";
+import { titleStatus } from "@/lib/f1Points";
 import { apiMessage, intlLocale, t, type Locale } from "@/lib/i18n";
+import type { F1CalendarApiResponse } from "@/types/calendar";
 import type {
-  SeasonConstructorStanding,
-  SeasonConstructorPointsAvailability,
   SeasonDriverStanding,
   SeasonStandingsApiResponse,
   SeasonStandingsPayload,
 } from "@/types/seasonStandings";
 
-function teamColor(name: string): string {
+export function teamColor(name: string): string {
   const normalized = name.toLocaleLowerCase("en-US");
 
-  if (normalized.includes("ferrari")) return "#ef4444";
-  if (normalized.includes("mercedes")) return "#2dd4bf";
-  if (normalized.includes("mclaren")) return "#f97316";
-  if (normalized.includes("red bull")) return "#3b82f6";
-  if (normalized.includes("williams")) return "#60a5fa";
-  if (normalized.includes("aston")) return "#10b981";
-  if (normalized.includes("alpine")) return "#38bdf8";
-  if (normalized.includes("haas")) return "#e5e7eb";
-  if (normalized.includes("audi")) return "#f43f5e";
-  if (normalized.includes("cadillac")) return "#facc15";
-  if (normalized === "rb f1 team" || normalized.includes("racing bulls")) return "#a78bfa";
+  if (normalized.includes("ferrari")) return "#dc0000";
+  if (normalized.includes("mercedes")) return "#00a19c";
+  if (normalized.includes("mclaren")) return "#f47600";
+  if (normalized.includes("red bull")) return "#1e41ff";
+  if (normalized.includes("williams")) return "#1868db";
+  if (normalized.includes("aston")) return "#00665e";
+  if (normalized.includes("alpine")) return "#0090ff";
+  if (normalized.includes("haas")) return "#9c9fa2";
+  if (normalized.includes("audi")) return "#bb0a30";
+  if (normalized.includes("cadillac")) return "#b59410";
+  if (normalized === "rb f1 team" || normalized.includes("racing bulls")) return "#6c98ff";
 
-  return "#a3a3a3";
-}
-
-function formatUpdatedAt(value: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return "#888888";
 }
 
 function driverName(driver: SeasonDriverStanding): string {
-  return [driver.givenName, driver.familyName].filter(Boolean).join(" ");
+  return `${driver.givenName} ${driver.familyName.toLocaleUpperCase("it-IT")}`.trim();
 }
 
-function pointsLabel(points: number, locale: Locale): string {
-  const formatted = new Intl.NumberFormat(intlLocale(locale), {
-    maximumFractionDigits: 1,
-  }).format(points);
-
-  return `${formatted} ${t(locale, "pointsShort")}`;
+function formatPoints(points: number, locale: Locale): string {
+  return new Intl.NumberFormat(intlLocale(locale), { maximumFractionDigits: 1 }).format(points);
 }
 
-function barWidth(points: number, maxPoints: number): string {
-  if (maxPoints <= 0) {
-    return "0%";
-  }
-
-  return `${Math.max(4, Math.min(100, (points / maxPoints) * 100))}%`;
-}
-
-function positionTone(position: number): string {
-  if (position === 1) return "border-amber-300/35 bg-amber-300/10 text-amber-100";
-  if (position === 2) return "border-neutral-200/30 bg-white/10 text-neutral-100";
-  if (position === 3) return "border-orange-300/30 bg-orange-300/10 text-orange-100";
-
-  return "border-white/10 bg-white/[0.035] text-neutral-300";
-}
-
-function StandingMeta({
-  points,
-  wins,
-  locale,
-}: {
-  points: number;
-  wins: number;
-  locale: Locale;
-}) {
+function PointsBar({ value, max, colour, width }: { value: number; max: number; colour: string; width: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs font-bold text-neutral-300">
-      <span>{pointsLabel(points, locale)}</span>
-      <span className="h-1 w-1 rounded-full bg-white/30" />
-      <span>
-        {wins} {t(locale, "wins")}
-      </span>
+    <div className="h-[5px] rounded-full bg-[#efefec]" style={{ width }}>
+      <div className="h-[5px] rounded-full" style={{ width: `${max > 0 ? (value / max) * 100 : 0}%`, backgroundColor: colour }} />
     </div>
   );
 }
 
-function DriverRow({
-  row,
-  maxPoints,
-  locale,
-}: {
-  row: SeasonDriverStanding;
-  maxPoints: number;
-  locale: Locale;
-}) {
-  const color = teamColor(row.constructorName);
+const CELL = "border-b border-[#efefec] px-2 py-1.5";
+const HEAD = "border-b border-line px-2 py-1.5 font-semibold";
 
-  return (
-    <article
-      className={`relative overflow-hidden rounded-lg border ${positionTone(
-        row.position,
-      )} px-3 py-3`}
-      data-season-driver-row
-    >
-      <div
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ backgroundColor: color }}
-        aria-hidden="true"
-      />
-      <div className="relative flex items-start gap-3">
-        <div className="grid h-10 w-10 flex-none place-items-center rounded-md border border-white/10 bg-neutral-950/55 text-sm font-black text-white">
-          P{row.position}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="text-base font-black text-white">{row.code}</span>
-                {row.position === 1 ? (
-                  <span className="rounded bg-amber-300/18 px-1.5 py-0.5 text-[0.66rem] font-black uppercase tracking-[0.12em] text-amber-100">
-                    {t(locale, "championshipLeader")}
-                  </span>
-                ) : null}
-              </div>
-              <h3 className="mt-0.5 truncate text-sm font-bold text-white">
-                {driverName(row)}
-              </h3>
-            </div>
-
-            {row.wikipediaUrl ? (
-              <a
-                href={row.wikipediaUrl}
-                target="_blank"
-                rel="noreferrer"
-                title={driverName(row)}
-                className="grid h-8 w-8 flex-none place-items-center rounded-md border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/12 hover:text-white"
-              >
-                <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              </a>
-            ) : null}
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-neutral-400">
-            <span>{row.constructorName}</span>
-            {row.permanentNumber ? (
-              <span>
-                {t(locale, "driverNumberLabel")} {row.permanentNumber}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="mt-3">
-            <div className="mb-1 flex items-center justify-between">
-              <StandingMeta points={row.points} wins={row.wins} locale={locale} />
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full"
-                style={{ width: barWidth(row.points, maxPoints), backgroundColor: color }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function ConstructorRow({
-  row,
-  maxPoints,
-  seasonMaxPoints,
-  locale,
-}: {
-  row: SeasonConstructorStanding;
-  maxPoints: number;
-  seasonMaxPoints: number | null;
-  locale: Locale;
-}) {
-  const color = teamColor(row.name);
-
-  return (
-    <article
-      className={`relative overflow-hidden rounded-lg border ${positionTone(
-        row.position,
-      )} px-3 py-3`}
-      data-season-constructor-row
-    >
-      <div className="relative flex items-start gap-3">
-        <div
-          className="grid h-11 w-11 flex-none place-items-center rounded-md text-sm font-black text-neutral-950"
-          style={{ backgroundColor: color }}
-        >
-          P{row.position}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h3 className="truncate text-base font-black text-white">{row.name}</h3>
-              {row.position === 1 ? (
-                <div className="mt-1 text-[0.66rem] font-black uppercase tracking-[0.12em] text-amber-100">
-                  {t(locale, "championshipLeader")}
-                </div>
-              ) : null}
-            </div>
-
-            {row.wikipediaUrl ? (
-              <a
-                href={row.wikipediaUrl}
-                target="_blank"
-                rel="noreferrer"
-                title={row.name}
-                className="grid h-8 w-8 flex-none place-items-center rounded-md border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/12 hover:text-white"
-              >
-                <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              </a>
-            ) : null}
-          </div>
-
-          <div className="mt-3">
-            <div className="mb-1">
-              <StandingMeta points={row.points} wins={row.wins} locale={locale} />
-              {seasonMaxPoints ? (
-                <div className="mt-1 text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-neutral-500">
-                  {t(locale, "constructorPointsOfMax", {
-                    current: pointsLabel(row.points, locale),
-                    max: pointsLabel(seasonMaxPoints, locale),
-                  })}
-                </div>
-              ) : null}
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/10">
-              <div
-                className="h-full rounded-full"
-                style={{ width: barWidth(row.points, maxPoints), backgroundColor: color }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function ConstructorPointsSummary({
-  points,
-  locale,
-}: {
-  points: SeasonConstructorPointsAvailability;
-  locale: Locale;
-}) {
-  return (
-    <article
-      className="rounded-lg border border-amber-300/20 bg-amber-300/[0.075] p-3"
-      data-constructor-points-available
-    >
-      <div className="flex items-start gap-3">
-        <div className="grid h-10 w-10 flex-none place-items-center rounded-md border border-amber-200/25 bg-amber-200/12 text-amber-100">
-          <Flag className="h-4 w-4" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-black uppercase tracking-[0.14em] text-amber-100/85">
-            {t(locale, "constructorAvailablePointsTitle")}
-          </div>
-          <div className="mt-1 text-[0.68rem] font-semibold text-amber-50/58">
-            {t(locale, "constructorAvailablePointsBreakdown", {
-              races: points.raceCount,
-              sprints: points.sprintCount,
-            })}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <div className="rounded-md border border-white/10 bg-neutral-950/35 px-2.5 py-2">
-              <div className="text-[0.66rem] font-bold uppercase tracking-[0.1em] text-neutral-400">
-                {t(locale, "constructorTotalPool")}
-              </div>
-              <div className="mt-1 text-base font-black text-white">
-                {pointsLabel(points.totalPointsPool, locale)}
-              </div>
-            </div>
-            <div className="rounded-md border border-white/10 bg-neutral-950/35 px-2.5 py-2">
-              <div className="text-[0.66rem] font-bold uppercase tracking-[0.1em] text-neutral-400">
-                {t(locale, "constructorMaxTeam")}
-              </div>
-              <div className="mt-1 text-base font-black text-white">
-                {pointsLabel(points.maxSingleConstructorPoints, locale)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function StandingsPanel({
-  title,
-  icon,
-  children,
-  count,
-}: {
-  title: string;
-  icon: "drivers" | "constructors";
-  children: React.ReactNode;
-  count: number;
-}) {
-  const Icon = icon === "drivers" ? UsersRound : Shield;
-
-  return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-neutral-950/72">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-red-300" aria-hidden="true" />
-          <h2 className="text-sm font-black uppercase tracking-[0.16em] text-white">
-            {title}
-          </h2>
-        </div>
-        <span className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-neutral-300">
-          {count}
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        <div className="grid gap-2">{children}</div>
-      </div>
-    </section>
-  );
+interface PodiumStat {
+  code: string;
+  team: string;
+  wins: number;
+  podiums: number;
 }
 
 export function SeasonStandings({ locale }: { locale: Locale }) {
   const [standings, setStandings] = useState<SeasonStandingsPayload | null>(null);
+  const [podiumStats, setPodiumStats] = useState<PodiumStat[]>([]);
+  const [totalRounds, setTotalRounds] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -347,17 +69,11 @@ export function SeasonStandings({ locale }: { locale: Locale }) {
 
     try {
       const params = new URLSearchParams({ lang: locale });
-      const response = await fetch(`/api/f1/season-standings?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | SeasonStandingsApiResponse
-        | null;
+      const response = await fetch(`/api/f1/season-standings?${params.toString()}`, { cache: "no-store" });
+      const payload = (await response.json().catch(() => null)) as SeasonStandingsApiResponse | null;
 
       if (!response.ok || !payload?.data) {
-        throw new Error(
-          payload?.meta.messages[0] ?? t(locale, "seasonStandingsNotAvailable"),
-        );
+        throw new Error(payload?.meta.messages[0] ?? t(locale, "seasonStandingsNotAvailable"));
       }
 
       setStandings(payload.data);
@@ -366,12 +82,32 @@ export function SeasonStandings({ locale }: { locale: Locale }) {
       }
     } catch (loadError) {
       setError(
-        loadError instanceof Error
-          ? apiMessage(locale, loadError.message)
-          : t(locale, "seasonStandingsNotAvailable"),
+        loadError instanceof Error ? apiMessage(locale, loadError.message) : t(locale, "seasonStandingsNotAvailable"),
       );
     } finally {
       setLoading(false);
+    }
+
+    // Vittorie e podi dai risultati del calendario (facoltativi: se mancano il pannello sparisce).
+    try {
+      const response = await fetch(`/api/f1/calendar?lang=${locale}`, { cache: "no-store" });
+      const payload = (await response.json().catch(() => null)) as F1CalendarApiResponse | null;
+      const races = payload?.data?.races ?? [];
+      const stats = new Map<string, PodiumStat>();
+
+      for (const race of races) {
+        for (const driver of race.podium) {
+          const entry = stats.get(driver.code) ?? { code: driver.code, team: driver.constructorName, wins: 0, podiums: 0 };
+          entry.podiums += 1;
+          if (driver.position === 1) entry.wins += 1;
+          stats.set(driver.code, entry);
+        }
+      }
+
+      setTotalRounds(races.length || null);
+      setPodiumStats([...stats.values()].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums).slice(0, 6));
+    } catch {
+      setPodiumStats([]);
     }
   }, [locale]);
 
@@ -379,145 +115,196 @@ export function SeasonStandings({ locale }: { locale: Locale }) {
     loadStandings();
   }, [loadStandings]);
 
-  const summary = useMemo(() => {
-    const drivers = standings?.drivers ?? [];
-    const constructors = standings?.constructors ?? [];
-    const maxDriverPoints = Math.max(...drivers.map((row) => row.points), 0);
-    const maxConstructorPoints = Math.max(...constructors.map((row) => row.points), 0);
-    const maxConstructorSeasonPoints =
-      standings?.constructorPointsAvailable?.maxSingleConstructorPoints ?? null;
-
-    return {
-      maxDriverPoints,
-      maxConstructorPoints,
-      maxConstructorSeasonPoints,
-      drivers: drivers.length,
-      constructors: constructors.length,
-    };
+  const titlesDecided = useMemo(() => {
+    if (!standings) return false;
+    const [first, second] = standings.drivers;
+    const [team, teamSecond] = standings.constructors;
+    if (!first || !team) return false;
+    const availability = standings.constructorPointsAvailable;
+    return (
+      titleStatus(first.points, second?.points ?? 0, availability, standings.round, "driver").decided &&
+      titleStatus(team.points, teamSecond?.points ?? 0, availability, standings.round, "constructor").decided
+    );
   }, [standings]);
 
+  if (loading && !standings) {
+    return (
+      <div className="grid h-full place-items-center text-sm text-muted">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin text-f1red" />
+          {t(locale, "seasonStandingsLoading")}
+        </div>
+      </div>
+    );
+  }
+
+  if (!standings) {
+    return (
+      <div className="grid h-full place-items-center text-center">
+        <div className="max-w-md">
+          <CircleAlert className="mx-auto mb-3 h-7 w-7 text-f1red" />
+          <h3 className="text-sm font-bold">{t(locale, "seasonStandingsUnavailable")}</h3>
+          <p className="mt-2 text-sm text-muted">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const leaderPoints = standings.drivers[0]?.points ?? 0;
+  const leaderTeamPoints = standings.constructors[0]?.points ?? 0;
+  const maxPodiums = Math.max(...podiumStats.map((entry) => entry.podiums), 1);
+
   return (
-    <section
-      className="flex h-full min-h-0 flex-col panel-neon rounded-xl overflow-hidden"
-      data-season-standings
-    >
-      <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Trophy className="h-4 w-4 text-amber-200" aria-hidden="true" />
-            <h2 className="text-sm font-black uppercase tracking-[0.16em] text-white">
-              {t(locale, "seasonStandingsTitle", { season: standings?.season ?? "" })}
-            </h2>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-xs sm:flex sm:flex-wrap">
-            <div className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2">
-              <div className="text-base font-black text-white">
-                {standings?.round ? standings.round : "-"}
-              </div>
-              <div className="font-semibold text-neutral-400">
-                {t(locale, "afterRound", { round: standings?.round ?? "-" })}
-              </div>
-            </div>
-            <div className="rounded-md border border-cyan-300/18 bg-cyan-300/8 px-2.5 py-2">
-              <div className="text-base font-black text-cyan-100">{summary.drivers}</div>
-              <div className="font-semibold text-cyan-100/65">{t(locale, "driverShort")}</div>
-            </div>
-            <div className="rounded-md border border-amber-300/18 bg-amber-300/8 px-2.5 py-2">
-              <div className="text-base font-black text-amber-100">{summary.constructors}</div>
-              <div className="font-semibold text-amber-100/65">
-                {t(locale, "constructorStandingsTitle")}
-              </div>
-            </div>
-            {standings ? (
-              <div className="col-span-3 self-end text-[0.68rem] font-semibold text-neutral-500 sm:col-span-1">
-                {t(locale, "updated")} {formatUpdatedAt(standings.generatedAt, locale)}
-              </div>
-            ) : null}
+    <section className="flex h-full min-h-0 flex-col gap-3" data-season-standings>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">{t(locale, "seasonTitle", { season: standings.season })}</h1>
+          <div className="text-sm text-muted">
+            {totalRounds
+              ? t(locale, "afterRoundOf", { round: standings.round, total: totalRounds })
+              : t(locale, "afterRound", { round: standings.round })}
+            {titlesDecided ? ` · ${t(locale, "titlesDecided")}` : ""}
           </div>
         </div>
-
         <button
           type="button"
           onClick={loadStandings}
           disabled={loading}
           title={t(locale, "seasonStandingsRefreshTitle")}
-          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-line bg-white px-3 text-xs font-semibold transition hover:bg-soft disabled:cursor-wait disabled:opacity-60"
         >
-          <RefreshCcw
-            className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-            aria-hidden="true"
-          />
+          <RefreshCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
           {t(locale, "refresh")}
         </button>
       </div>
 
-      {loading && !standings ? (
-        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center text-sm text-neutral-300">
-          <div>
-            <Loader2 className="mx-auto mb-3 h-7 w-7 animate-spin text-red-300" />
-            {t(locale, "seasonStandingsLoading")}
+      {error ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{error}</div>
+      ) : null}
+
+      <ChampionsBanner standings={standings} locale={locale} teamColor={teamColor} />
+
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+        <div className="panel flex min-h-0 flex-col overflow-hidden rounded-md">
+          <PanelHeader title={t(locale, "driverStandingsTitle")} meta={t(locale, "driversCount", { count: standings.drivers.length })} />
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-soft text-left text-[10px] uppercase tracking-[0.06em] text-muted">
+                <tr>
+                  <th className={HEAD} />
+                  <th className={HEAD}>{t(locale, "driverColumn")}</th>
+                  <th className={HEAD}>{t(locale, "teamColumn")}</th>
+                  <th className={HEAD} />
+                  <th className={`${HEAD} text-right`}>{t(locale, "winsColumn")}</th>
+                  <th className={`${HEAD} text-right`}>{t(locale, "gapColumn")}</th>
+                  <th className={`${HEAD} text-right`}>{t(locale, "pointsColumn")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {standings.drivers.map((row) => (
+                  <tr key={row.driverId || row.code} className="hover:bg-soft">
+                    <td className={`${CELL} w-7 text-center font-display text-[13px] font-bold`}>{row.position}</td>
+                    <td className={CELL}>
+                      <span className="flex items-center gap-2">
+                        <span className="h-3.5 w-[3px] rounded-sm" style={{ backgroundColor: teamColor(row.constructorName) }} />
+                        {row.wikipediaUrl ? (
+                          <a href={row.wikipediaUrl} target="_blank" rel="noreferrer" className="font-display text-[13px] font-bold hover:underline">
+                            {driverName(row)}
+                          </a>
+                        ) : (
+                          <span className="font-display text-[13px] font-bold">{driverName(row)}</span>
+                        )}
+                      </span>
+                    </td>
+                    <td className={`${CELL} text-[11px] text-muted`}>{row.constructorName}</td>
+                    <td className={CELL}>
+                      <PointsBar value={row.points} max={leaderPoints} colour={teamColor(row.constructorName)} width="10rem" />
+                    </td>
+                    <td className={`${CELL} text-right`}>{row.wins}</td>
+                    <td className={`${CELL} text-right text-muted`}>
+                      {row.position === 1 ? "—" : `-${formatPoints(leaderPoints - row.points, locale)}`}
+                    </td>
+                    <td className={`${CELL} text-right font-bold`}>{formatPoints(row.points, locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      ) : error && !standings ? (
-        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
-          <div className="max-w-md">
-            <CircleAlert className="mx-auto mb-3 h-7 w-7 text-red-300" />
-            <h3 className="text-sm font-bold text-white">
-              {t(locale, "seasonStandingsUnavailable")}
-            </h3>
-            <p className="mt-2 text-sm text-neutral-400">{error}</p>
+
+        <div className="flex min-h-0 flex-col gap-4">
+          <div className="panel flex min-h-0 flex-col overflow-hidden rounded-md">
+            <PanelHeader title={t(locale, "constructorStandingsTitle")} meta={t(locale, "teamsCount", { count: standings.constructors.length })} />
+            <div className="min-h-0 overflow-auto">
+              <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 bg-soft text-left text-[10px] uppercase tracking-[0.06em] text-muted">
+                  <tr>
+                    <th className={HEAD} />
+                    <th className={HEAD}>{t(locale, "teamColumn")}</th>
+                    <th className={HEAD} />
+                    <th className={`${HEAD} text-right`}>{t(locale, "winsColumn")}</th>
+                    <th className={`${HEAD} text-right`}>{t(locale, "gapColumn")}</th>
+                    <th className={`${HEAD} text-right`}>{t(locale, "pointsColumn")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {standings.constructors.map((row) => (
+                    <tr key={row.constructorId || row.name} className="hover:bg-soft">
+                      <td className={`${CELL} w-7 text-center font-display text-[13px] font-bold`}>{row.position}</td>
+                      <td className={CELL}>
+                        <span className="flex items-center gap-2">
+                          <span className="h-3.5 w-[3px] rounded-sm" style={{ backgroundColor: teamColor(row.name) }} />
+                          <span className="font-display text-[13px] font-bold">{row.name}</span>
+                        </span>
+                      </td>
+                      <td className={CELL}>
+                        <PointsBar value={row.points} max={leaderTeamPoints} colour={teamColor(row.name)} width="9rem" />
+                      </td>
+                      <td className={`${CELL} text-right`}>{row.wins}</td>
+                      <td className={`${CELL} text-right text-muted`}>
+                        {row.position === 1 ? "—" : `-${formatPoints(leaderTeamPoints - row.points, locale)}`}
+                      </td>
+                      <td className={`${CELL} text-right font-bold`}>{formatPoints(row.points, locale)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          {error ? (
-            <div className="border-b border-amber-300/20 bg-amber-300/10 px-4 py-2 text-sm text-amber-50">
-              {error}
+
+          {podiumStats.length > 0 ? (
+            <div className="panel rounded-md px-4 py-3">
+              <div className="mb-1 flex items-baseline justify-between">
+                <h2 className="text-[13px] font-bold uppercase tracking-[0.08em]">{t(locale, "winsPodiums")}</h2>
+                <span className="text-[10px] text-muted">{t(locale, "winsPodiumsHint")}</span>
+              </div>
+              {podiumStats.map((entry) => (
+                <div key={entry.code} className="grid grid-cols-[2.75rem_1fr_4.5rem] items-center gap-2.5 py-1">
+                  <span className="font-display text-[13px] font-bold">{entry.code}</span>
+                  <div className="flex h-3 overflow-hidden rounded-sm bg-[#efefec]">
+                    <div style={{ width: `${(entry.wins / maxPodiums) * 100}%`, backgroundColor: teamColor(entry.team) }} />
+                    <div
+                      style={{ width: `${((entry.podiums - entry.wins) / maxPodiums) * 100}%`, backgroundColor: teamColor(entry.team), opacity: 0.35 }}
+                    />
+                  </div>
+                  <span className="text-right text-[10px] text-muted">
+                    {entry.wins} V · {entry.podiums} P
+                  </span>
+                </div>
+              ))}
             </div>
           ) : null}
-
-          <div className="grid h-full min-h-[34rem] gap-3 p-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-            <StandingsPanel
-              title={t(locale, "driverStandingsTitle")}
-              icon="drivers"
-              count={standings?.drivers.length ?? 0}
-            >
-              {(standings?.drivers ?? []).map((row) => (
-                <DriverRow
-                  key={row.driverId || row.code}
-                  row={row}
-                  maxPoints={summary.maxDriverPoints}
-                  locale={locale}
-                />
-              ))}
-            </StandingsPanel>
-
-            <StandingsPanel
-              title={t(locale, "constructorStandingsTitle")}
-              icon="constructors"
-              count={standings?.constructors.length ?? 0}
-            >
-              {standings?.constructorPointsAvailable ? (
-                <ConstructorPointsSummary
-                  points={standings.constructorPointsAvailable}
-                  locale={locale}
-                />
-              ) : null}
-              {(standings?.constructors ?? []).map((row) => (
-                <ConstructorRow
-                  key={row.constructorId || row.name}
-                  row={row}
-                  maxPoints={
-                    summary.maxConstructorSeasonPoints ?? summary.maxConstructorPoints
-                  }
-                  seasonMaxPoints={summary.maxConstructorSeasonPoints}
-                  locale={locale}
-                />
-              ))}
-            </StandingsPanel>
-          </div>
         </div>
-      )}
+      </div>
     </section>
+  );
+}
+
+function PanelHeader({ title, meta }: { title: string; meta: string }) {
+  return (
+    <div className="flex items-center justify-between border-b border-line px-3.5 py-2.5">
+      <h2 className="text-[13px] font-bold uppercase tracking-[0.08em]">{title}</h2>
+      <span className="text-[11px] text-muted">{meta}</span>
+    </div>
   );
 }

@@ -540,16 +540,16 @@ export function GapLadder({
   return (
     <section
       aria-label={t(locale, "gapLadderAria")}
-      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-fuchsia-500/25 bg-[radial-gradient(ellipse_at_30%_40%,#1e1b4b_0%,#05010f_75%)] shadow-2xl"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-white"
     >
-      <div className="flex flex-none items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+      <div className="flex flex-none items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <ArrowRightLeft className="h-4 w-4 text-red-300" aria-hidden="true" />
-          <h2 className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">
+          <ArrowRightLeft className="h-4 w-4 text-red-600" aria-hidden="true" />
+          <h2 className="truncate text-[13px] font-bold uppercase tracking-[0.08em] text-ink">
             {t(locale, "gapLadderTitle")}
           </h2>
         </div>
-        <div className="flex min-w-0 items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/45">
+        <div className="flex min-w-0 items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
           <span className="hidden truncate sm:inline">
             {circuitName(locale, meeting?.circuitShortName)}
           </span>
@@ -562,10 +562,10 @@ export function GapLadder({
           {/* Nastro della corsia: piu' luminoso verso il leader, altezza adattiva */}
           <div
             ref={bandRef}
-            className="pointer-events-none absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-xl border border-fuchsia-400/30 bg-gradient-to-r from-cyan-400/[0.12] via-fuchsia-500/[0.06] to-transparent shadow-[0_0_30px_-8px_rgba(217,70,239,0.55),inset_0_0_24px_-10px_rgba(34,211,238,0.5)]"
+            className="pointer-events-none absolute inset-x-3 top-1/2 -translate-y-1/2 rounded-md border border-line bg-soft"
             style={{ height: "clamp(6rem, 62%, 11rem)" }}
           >
-            <div className="absolute inset-x-4 top-1/2 border-t border-dashed border-cyan-300/25" />
+            <div className="absolute inset-x-4 top-1/2 border-t border-dashed border-line" />
             {/* Blocco di partenza a scacchi in corrispondenza del leader */}
             <div
               className="absolute bottom-1 top-1 w-2 rounded-sm opacity-70 [background:repeating-conic-gradient(#e5e5e5_0%_25%,#0a0a0a_0%_50%)_0_0/8px_8px]"
@@ -584,10 +584,10 @@ export function GapLadder({
                   trainNodes.current.delete(train.key);
                 }
               }}
-              className="pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-2xl border border-amber-300/30 bg-amber-300/[0.07]"
+              className="pointer-events-none absolute top-1/2 -translate-y-1/2 rounded-lg border border-amber-300/60 bg-amber-100/40"
               style={{ left: -9999, width: 0, height: "clamp(6.5rem, 66%, 11.5rem)" }}
             >
-              <span className="absolute -top-2.5 left-3 rounded bg-amber-400/90 px-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-neutral-950">
+              <span className="absolute -top-2.5 left-3 rounded bg-amber-400/90 px-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-ink">
                 {t(locale, "gapLadderTrain")} ×{train.members.length}
               </span>
             </div>
@@ -604,10 +604,10 @@ export function GapLadder({
                   drsNodes.current.delete(pair.chaser);
                 }
               }}
-              className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-emerald-400 shadow-[0_0_12px_3px_rgba(52,211,153,0.6)]"
+              className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-emerald-400"
               style={{ left: -9999, width: 0 }}
             >
-              <span className="absolute -top-5 left-1/2 -translate-x-1/2 rounded bg-emerald-400 px-1 text-[8px] font-black tracking-wider text-neutral-950">
+              <span className="absolute -top-5 left-1/2 -translate-x-1/2 rounded bg-emerald-400 px-1 text-[8px] font-black tracking-wider text-ink">
                 DRS
               </span>
             </div>
@@ -618,19 +618,19 @@ export function GapLadder({
             {overtakes.map((event) => (
               <div
                 key={event.id}
-                className="animate-overtake-banner flex items-center gap-2 overflow-hidden rounded-md border border-yellow-300/60 bg-neutral-950/90 py-1 pl-0 pr-3 shadow-xl shadow-black/50"
+                className="animate-overtake-banner flex items-center gap-2 overflow-hidden rounded-md border border-yellow-300/60 bg-white py-1 pl-0 pr-3 shadow-sm"
               >
                 <span className="h-6 w-1.5" style={{ backgroundColor: event.teamColour }} />
-                <span className="text-xs font-black italic tracking-wide text-white">
+                <span className="text-xs font-black tracking-wide text-ink">
                   {event.acronym}
                 </span>
                 {event.kind === "pit" ? (
                   <>
-                    <span className="text-[10px] font-semibold uppercase text-cyan-200/80">
+                    <span className="text-[10px] font-semibold uppercase text-ink">
                       {t(locale, "pitBanner")}
                     </span>
                     <span
-                      className="flex h-5 w-5 items-center justify-center rounded-full border-2 bg-neutral-950 text-[9px] font-black text-white"
+                      className="flex h-5 w-5 items-center justify-center rounded-full border-2 bg-white text-[9px] font-black text-ink"
                       style={{ borderColor: TYRE_COLOURS[event.compound ?? ""] ?? "#a3a3a3" }}
                     >
                       {tyreLetter(event.compound)}
@@ -638,13 +638,13 @@ export function GapLadder({
                   </>
                 ) : (
                   <>
-                    <span className="text-[10px] font-semibold uppercase text-yellow-200/80">
+                    <span className="text-[10px] font-semibold uppercase text-ink">
                       {t(locale, "gapLadderOvertake")}
                     </span>
                     {event.victimAcronym ? (
-                      <span className="text-xs font-black italic text-white/70">{event.victimAcronym}</span>
+                      <span className="text-xs font-black text-ink">{event.victimAcronym}</span>
                     ) : null}
-                    <span className="rounded bg-yellow-300 px-1.5 text-[10px] font-black text-neutral-950">
+                    <span className="rounded bg-yellow-300 px-1.5 text-[10px] font-black text-ink">
                       ↗ P{event.position}
                     </span>
                   </>
@@ -668,8 +668,8 @@ export function GapLadder({
               className="pointer-events-none absolute -translate-x-1/2 text-center"
               style={{ left: -9999, top: 0 }}
             >
-              <div className="mx-auto h-2 w-px bg-white/25" />
-              <div className="mt-0.5 font-mono text-[10px] font-semibold text-white/45">
+              <div className="mx-auto h-2 w-px bg-line/70" />
+              <div className="mt-0.5 text-[10px] font-semibold text-muted">
                 {value === 0 ? "0s" : `+${value}s`}
               </div>
             </div>
@@ -708,32 +708,31 @@ export function GapLadder({
                     selectedDriverNumber === row.driverNumber ? null : row.driverNumber,
                   );
                 }}
-                className={`absolute left-0 top-1/2 flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-left backdrop-blur-sm transition-[opacity,box-shadow] duration-150 ${flashing ? "animate-overtake-flash border-yellow-300/80" : ""} focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+                className={`absolute left-0 top-1/2 flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-left transition-[opacity,box-shadow] duration-150 ${flashing ? "animate-overtake-flash border-yellow-300/80" : ""} focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
                   active
-                    ? "border-white/70 bg-white/15 shadow-lg shadow-black/40"
-                    : "border-white/15 bg-[#0b0420]/90 hover:border-white/40"
+                    ? "border-ink bg-white shadow-md"
+                    : "border-line bg-white hover:border-muted"
                 } ${inPit ? "border-dashed" : ""}`}
                 style={{
                   // transform intenzionalmente mai impostato qui: e' del loop rAF.
                   willChange: "transform",
                   zIndex: active ? 60 : 40 - (row.position ?? 30),
                   opacity: dimmed ? 0.45 : 1,
-                  boxShadow: active || flashing ? undefined : `0 0 10px -2px ${row.teamColour}`,
                 }}
               >
                 <span
                   className="h-2.5 w-2.5 flex-none rounded-full"
                   style={{ backgroundColor: row.teamColour }}
                 />
-                <span className="font-mono text-[10px] font-semibold text-neutral-400">
+                <span className="text-[10px] font-semibold text-muted">
                   {row.position}
                 </span>
-                <span className="text-[11px] font-black tracking-wide text-white">
+                <span className="text-[11px] font-black tracking-wide text-ink">
                   {row.acronym}
                 </span>
                 {row.tyre ? (
                   <span
-                    className="flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border-[1.5px] text-[7px] font-black text-white"
+                    className="flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full border-[1.5px] text-[7px] font-black text-ink"
                     style={{ borderColor: TYRE_COLOURS[row.tyre.compound] ?? "#a3a3a3" }}
                     title={row.tyre.compound}
                   >
@@ -741,23 +740,23 @@ export function GapLadder({
                   </span>
                 ) : null}
                 {inPit ? (
-                  <span className="rounded bg-cyan-400 px-1 text-[8px] font-black text-neutral-950">
+                  <span className="rounded bg-cyan-400 px-1 text-[8px] font-black text-ink">
                     {t(locale, "gapLadderPit")}
                   </span>
                 ) : null}
                 {active && row.position !== 1 ? (
-                  <span className="font-mono text-[9px] font-semibold text-cyan-100/80">
+                  <span className="text-[9px] font-semibold text-ink">
                     {row.interval}
                   </span>
                 ) : null}
                 {trend === "gaining" ? (
                   <ArrowUp
-                    className="h-3 w-3 flex-none text-emerald-400"
+                    className="h-3 w-3 flex-none text-emerald-600"
                     aria-label={t(locale, "gapLadderGaining")}
                   />
                 ) : trend === "losing" ? (
                   <ArrowDown
-                    className="h-3 w-3 flex-none text-red-400"
+                    className="h-3 w-3 flex-none text-red-600"
                     aria-label={t(locale, "gapLadderLosing")}
                   />
                 ) : null}
@@ -766,9 +765,9 @@ export function GapLadder({
           })}
 
           {!hasLane ? (
-            <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 rounded-lg border border-white/10 bg-neutral-950/74 p-4 text-sm text-neutral-300 backdrop-blur">
-              <div className="flex items-center gap-2 font-semibold text-white">
-                <MousePointer2 className="h-4 w-4 flex-none text-cyan-300" aria-hidden="true" />
+            <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 rounded-lg border border-line bg-white p-4 text-sm text-muted">
+              <div className="flex items-center gap-2 font-semibold text-ink">
+                <MousePointer2 className="h-4 w-4 flex-none text-cyan-600" aria-hidden="true" />
                 {t(locale, isRace ? "gapLadderEmpty" : "gapLadderRaceOnly")}
               </div>
             </div>
@@ -776,8 +775,8 @@ export function GapLadder({
         </div>
 
         {sidelined.length > 0 ? (
-          <aside className="flex w-28 flex-none flex-col border-l border-dashed border-white/15 px-2 py-3">
-            <div className="px-1 pb-2 text-[10px] font-black uppercase tracking-[0.14em] text-white/45">
+          <aside className="flex w-28 flex-none flex-col border-l border-dashed border-line px-2 py-3">
+            <div className="px-1 pb-2 text-[10px] font-black uppercase tracking-[0.14em] text-muted">
               {t(locale, "gapLadderLapped")}
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
@@ -799,19 +798,19 @@ export function GapLadder({
                         selectedDriverNumber === row.driverNumber ? null : row.driverNumber,
                       )
                     }
-                    className={`flex flex-none cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+                    className={`flex flex-none cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/30 ${
                       active
-                        ? "border-white/70 bg-white/15"
-                        : "border-white/15 bg-neutral-950/85 hover:border-white/40"
+                        ? "border-line bg-line/70"
+                        : "border-line bg-white hover:border-line"
                     }`}
                   >
                     <span
                       className="h-2 w-2 flex-none rounded-full"
                       style={{ backgroundColor: row.teamColour }}
                     />
-                    <span className="text-[10px] font-black text-white">{row.acronym}</span>
+                    <span className="text-[10px] font-black text-ink">{row.acronym}</span>
                     {row.lappedCount !== null ? (
-                      <span className="ml-auto font-mono text-[9px] font-semibold text-amber-200/80">
+                      <span className="ml-auto text-[9px] font-semibold text-ink">
                         {t(locale, "gapLadderLappedShort", { laps: row.lappedCount })}
                       </span>
                     ) : null}
@@ -824,17 +823,17 @@ export function GapLadder({
       </div>
 
       {catchEstimate ? (
-        <div className="pointer-events-none absolute left-4 top-3 z-[65] max-w-xs rounded-md border border-fuchsia-400/40 bg-[#0b0420]/90 px-3 py-2 shadow-[0_0_18px_-6px_rgba(217,70,239,0.7)]">
-          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-fuchsia-300/80">
+        <div className="pointer-events-none absolute left-4 top-3 z-[65] max-w-xs rounded-md border border-line bg-white px-3 py-2 shadow-sm">
+          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-muted">
             {t(locale, "catchTitle")} · {catchEstimate.chaser.acronym} → {catchEstimate.ahead.acronym}
           </div>
           <div
             className={`mt-0.5 text-xs font-bold ${
               catchEstimate.tone === "good"
-                ? "text-emerald-300"
+                ? "text-emerald-600"
                 : catchEstimate.tone === "bad"
-                  ? "text-red-300"
-                  : "text-white/70"
+                  ? "text-red-600"
+                  : "text-ink"
             }`}
           >
             {catchEstimate.text}

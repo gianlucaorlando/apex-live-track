@@ -1,10 +1,24 @@
 @import "tailwindcss";
 
+/* Stile "serio": fondo chiaro neutro, pannelli bianchi, inchiostro F1, rosso solo come accento. */
+@theme {
+  --color-ink: #15151e;
+  --color-muted: #6d6d78;
+  --color-line: #e4e4e0;
+  --color-soft: #f7f7f5;
+  --color-page: #f3f3f1;
+  --color-f1red: #e10600;
+  --color-timing-purple: #7a3fd1;
+  --color-timing-green: #1f9d55;
+  --color-timing-yellow: #c79a00;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-titillium), var(--font-inter), sans-serif;
+}
+
 :root {
-  color-scheme: dark;
-  background: #070707;
-  --background: #070707;
-  --foreground: #f7f7f7;
+  color-scheme: light;
+  --background: #f3f3f1;
+  --foreground: #15151e;
 }
 
 * {
@@ -19,16 +33,14 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    #070707;
-  background-size: 42px 42px;
+  background: var(--background);
   color: var(--foreground);
-  font-family:
-    Arial,
-    Helvetica,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
 }
 
 button,
@@ -37,27 +49,34 @@ a {
 }
 
 ::selection {
-  background: rgba(239, 68, 68, 0.35);
-  color: #ffffff;
+  background: rgba(225, 6, 0, 0.18);
 }
 
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 *::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-  border: 2px solid rgba(0, 0, 0, 0.7);
+  background: #d4d4cf;
   border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: #b9b9b3;
+}
+
+/* Pannello standard */
+.panel {
+  border: 1px solid var(--color-line);
+  background: #ffffff;
+}
+.panel-title {
+  color: var(--color-ink);
 }
 
 /* GapLadder: banner sorpasso e lampo sulla pillola */
@@ -79,24 +98,6 @@ a {
   .animate-overtake-flash { animation: none; }
 }
 
-/* Pannelli "neon glass" condivisi */
-.panel-neon {
-  border: 1px solid rgba(217, 70, 239, 0.22);
-  background:
-    linear-gradient(180deg, rgba(30, 27, 75, 0.55), rgba(5, 1, 15, 0.82));
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.04) inset,
-    0 20px 50px -20px rgba(0, 0, 0, 0.8),
-    0 0 40px -18px rgba(217, 70, 239, 0.45);
-  backdrop-filter: blur(14px) saturate(1.3);
-}
-.panel-neon-title {
-  background: linear-gradient(90deg, #67e8f9, #e879f9);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
 @keyframes row-in {
   from { opacity: 0; transform: translateX(-10px); }
   to { opacity: 1; transform: none; }
@@ -104,22 +105,22 @@ a {
 .animate-row-in { animation: row-in 0.45s ease-out both; }
 
 @keyframes position-gain {
-  0% { background-color: rgba(52, 211, 153, 0.28); }
+  0% { background-color: rgba(31, 157, 85, 0.14); }
   100% { background-color: transparent; }
 }
 @keyframes position-loss {
-  0% { background-color: rgba(248, 113, 113, 0.22); }
+  0% { background-color: rgba(192, 57, 43, 0.12); }
   100% { background-color: transparent; }
 }
 .animate-position-gain { animation: position-gain 2.4s ease-out; }
 .animate-position-loss { animation: position-loss 2.4s ease-out; }
 
-@keyframes aurora {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(4%, -3%) scale(1.08); }
-}
-.animate-aurora { animation: aurora 22s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-row-in, .animate-position-gain, .animate-position-loss, .animate-aurora { animation: none; }
+  .animate-row-in, .animate-position-gain, .animate-position-loss { animation: none; }
+}
+
+@keyframes champion-shine {
+  0%, 100% { background-position: 150% 0; }
+  50% { background-position: -50% 0; }
 }

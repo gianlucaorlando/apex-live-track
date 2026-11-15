@@ -9,9 +9,9 @@ export function LoadingState({
   message?: string;
 }) {
   return (
-    <div className="grid min-h-[60vh] place-items-center rounded-lg border border-white/10 bg-neutral-950/70">
-      <div className="flex items-center gap-3 text-sm text-neutral-300">
-        <LoaderCircle className="h-5 w-5 animate-spin text-red-400" aria-hidden="true" />
+    <div className="grid min-h-[60vh] place-items-center rounded-lg border border-line bg-white">
+      <div className="flex items-center gap-3 text-sm text-muted">
+        <LoaderCircle className="h-5 w-5 animate-spin text-red-600" aria-hidden="true" />
         {message ?? t(locale, "loadingOpenF1")}
       </div>
     </div>

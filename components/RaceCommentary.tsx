@@ -163,35 +163,35 @@ export function RaceCommentary({
 
   return (
     <aside
-      className="panel-neon flex h-full min-h-0 flex-col overflow-hidden rounded-xl"
+      className="panel flex h-full min-h-0 flex-col overflow-hidden rounded-md"
       aria-label={t(locale, "commentaryAria")}
       data-race-commentary
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2.5 w-2.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60 motion-reduce:animate-none" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
           </span>
-          <Radio className="h-4 w-4 text-fuchsia-300" aria-hidden="true" />
-          <h2 className="panel-neon-title text-sm font-black uppercase italic tracking-[0.18em]">
+          <Radio className="h-4 w-4 text-muted" aria-hidden="true" />
+          <h2 className="panel-title text-[13px] font-bold uppercase tracking-[0.08em]">
             {t(locale, "commentary")}
           </h2>
         </div>
-        <span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-2.5 py-0.5 font-mono text-xs font-bold text-fuchsia-100">
+        <span className="text-[11px] text-muted">
           {entries.length || 0}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {entries.length === 0 ? (
-          <div className="grid h-full min-h-0 place-items-center px-6 text-center text-sm text-neutral-400">
+          <div className="grid h-full min-h-0 place-items-center px-6 text-center text-sm text-muted">
             {t(locale, "commentaryEmpty")}
           </div>
         ) : (
           <div className="relative px-2 py-2" role="list">
             {/* Linea verticale della timeline */}
-            <span className="pointer-events-none absolute bottom-4 left-[1.45rem] top-4 w-px bg-gradient-to-b from-fuchsia-400/60 via-cyan-300/25 to-transparent" />
+            <span className="pointer-events-none absolute bottom-4 left-[1.45rem] top-4 w-px bg-line" />
             {entries.map((entry, index) => {
               const isLatest = index === 0;
 
@@ -238,20 +238,20 @@ export function RaceCommentary({
                 >
                   <div className="relative z-10 flex justify-center pt-2">
                     <span
-                      className={`grid h-7 w-7 place-items-center rounded-full border border-white/15 bg-[#0b0420] shadow-[0_0_12px_-2px_currentColor] ${tone.dot.replace("bg-", "text-")}`}
+                      className={`grid h-7 w-7 place-items-center rounded-full border border-line bg-white ${tone.dot.replace("bg-", "text-")}`}
                     >
                       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                     </span>
                   </div>
 
                   <div
-                    className={`min-w-0 rounded-lg border-l-2 bg-white/[0.035] px-3 py-2 transition ${tone.rail} ${
-                      message.driverNumber !== null ? "hover:bg-white/[0.08]" : ""
-                    } ${isLatest ? "ring-1 ring-fuchsia-400/40" : ""}`}
+                    className={`min-w-0 rounded-lg border-l-2 bg-soft px-3 py-2 transition ${tone.rail} ${
+                      message.driverNumber !== null ? "hover:bg-soft" : ""
+                    } ${isLatest ? "ring-1 ring-ink/15" : ""}`}
                   >
-                    <div className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-neutral-400">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
                       {isLatest ? (
-                        <span className="rounded bg-fuchsia-500 px-1 text-[9px] text-white">LIVE</span>
+                        <span className="rounded-sm bg-f1red px-1 text-[9px] text-white">LIVE</span>
                       ) : null}
                       <span className="font-mono">{formatRaceControlTime(message.date, locale)}</span>
                       {message.lapNumber !== null ? (
@@ -267,7 +267,7 @@ export function RaceCommentary({
                       ) : null}
                     </div>
 
-                    <p className="mt-1 break-words text-sm font-semibold leading-snug text-white">
+                    <p className="mt-1 break-words text-sm font-semibold leading-snug text-ink">
                       {body}
                     </p>
 
@@ -277,7 +277,7 @@ export function RaceCommentary({
                       >
                         {raceControlCategoryLabel(message, locale)}
                       </span>
-                      <span className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-neutral-500">
+                      <span className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted">
                         {t(locale, "raceControl")}
                       </span>
                     </div>
@@ -336,42 +336,42 @@ function ExtraEntry({
       style={{ animationDelay: `${Math.min(index, 15) * 30}ms` }}
     >
       <div className="relative z-10 flex justify-center pt-2">
-        <span className={`grid h-7 w-7 place-items-center rounded-full border border-white/15 bg-[#0b0420] shadow-[0_0_12px_-2px_currentColor] ${style.accent}`}>
+        <span className={`grid h-7 w-7 place-items-center rounded-full border border-line bg-white ${style.accent}`}>
           <Icon className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
       </div>
 
-      <div className={`flex min-w-0 items-center gap-3 rounded-lg border-l-2 bg-white/[0.035] px-3 py-2 ${style.rail} ${isLatest ? "ring-1 ring-fuchsia-400/40" : ""}`}>
+      <div className={`flex min-w-0 items-center gap-3 rounded-lg border-l-2 bg-soft px-3 py-2 ${style.rail} ${isLatest ? "ring-1 ring-ink/15" : ""}`}>
         <button
           type="button"
           onClick={() => onSelectDriver(driverNumber)}
           className="min-w-0 flex-1 cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50"
         >
-          <div className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-neutral-400">
-            {isLatest ? <span className="rounded bg-fuchsia-500 px-1 text-[9px] text-white">LIVE</span> : null}
+          <div className="flex flex-wrap items-center gap-1.5 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-muted">
+            {isLatest ? <span className="rounded-sm bg-f1red px-1 text-[9px] text-white">LIVE</span> : null}
             <span className="font-mono">{formatRaceControlTime(entry.date, locale)}</span>
             <span className={style.accent}>{style.label}</span>
           </div>
-          <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-white">
+          <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-ink">
             <span className="h-3.5 w-1 flex-none rounded-sm" style={{ backgroundColor: colour }} />
-            <span className="font-black italic">{acronym}</span>
+            <span className="font-black">{acronym}</span>
             {entry.kind === "pit" ? (
-              <span className="text-white/75">
+              <span className="text-ink">
                 {entry.stop.stopDuration !== null ? `${entry.stop.stopDuration.toFixed(1)}s` : ""}
                 {entry.stop.lapNumber !== null ? (
-                  <span className="ml-1.5 text-xs text-white/45">
+                  <span className="ml-1.5 text-xs text-muted">
                     {t(locale, "lapShort")}
                     {entry.stop.lapNumber}
                   </span>
                 ) : null}
               </span>
             ) : entry.kind === "overtake" ? (
-              <span className="flex items-center gap-1.5 text-white/75">
+              <span className="flex items-center gap-1.5 text-ink">
                 <span className="text-xs">{t(locale, "gapLadderOvertake")}</span>
-                <span className="font-black italic">
+                <span className="font-black">
                   {driverByNumber.get(entry.overtake.overtakenDriver)?.acronym ?? `#${entry.overtake.overtakenDriver}`}
                 </span>
-                <span className="rounded bg-yellow-300 px-1 text-[10px] font-black text-neutral-950">P{entry.overtake.position}</span>
+                <span className="rounded bg-yellow-300 px-1 text-[10px] font-black text-ink">P{entry.overtake.position}</span>
               </span>
             ) : null}
           </div>
@@ -384,8 +384,8 @@ function ExtraEntry({
             aria-label={playing ? t(locale, "pauseRadio") : t(locale, "playRadio")}
             className={`grid h-9 w-9 flex-none place-items-center rounded-full border transition ${
               playing
-                ? "border-cyan-300 bg-cyan-400 text-neutral-950 shadow-[0_0_16px_rgba(34,211,238,0.7)]"
-                : "border-cyan-300/40 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-400/20"
+                ? "border-cyan-300 bg-cyan-400 text-ink"
+                : "border-cyan-300/40 bg-cyan-400/10 text-ink hover:bg-cyan-400/20"
             }`}
           >
             {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
