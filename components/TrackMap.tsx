@@ -215,7 +215,7 @@ function WeatherMiniBar({
           </span>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-black text-ink">{state.label}</span>
+              <span className="whitespace-nowrap text-sm font-black">{state.label}</span>
               <span className="hidden text-ink sm:inline">{state.detail}</span>
               <span className="rounded bg-line/70 px-1.5 py-0.5 text-[10px] uppercase text-ink">
                 {weather ? formatTime(weather.observedAt, locale) : "--"}

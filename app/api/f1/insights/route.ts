@@ -16,6 +16,7 @@ const EMPTY_INSIGHTS: SessionInsights = {
   bestSectors: [null, null, null],
   lapsByDriver: {},
   speedTrap: [],
+  gapByLap: {},
 };
 
 export async function GET(request: Request) {

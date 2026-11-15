@@ -82,6 +82,8 @@ export interface SessionInsights {
   bestSectors: [FastestLap | null, FastestLap | null, FastestLap | null];
   lapsByDriver: Record<number, DriverLapInfo>;
   speedTrap: { driverNumber: number; speed: number }[];
+  /** Distacco dal leader (s) al passaggio sul traguardo: driverNumber -> giro -> secondi. */
+  gapByLap: Record<number, Record<number, number>>;
 }
 
 export interface CarTelemetrySample {

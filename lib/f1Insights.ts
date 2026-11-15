@@ -136,6 +136,38 @@ function computeLaps(laps: Raw[]): Pick<SessionInsights, "fastestLap" | "bestSec
   return { fastestLap, bestSectors, lapsByDriver, speedTrap };
 }
 
+/**
+ * Distacco dal leader giro per giro, dagli istanti di passaggio sul traguardo:
+ * l'inizio del giro N+1 coincide con la fine del giro N. Per ogni giro il primo
+ * a transitare e' il riferimento (distacco 0). Solo per le gare: in prova e
+ * qualifica i giri non sono confrontabili cosi'.
+ */
+function computeGapByLap(laps: Raw[]): Record<number, Record<number, number>> {
+  const crossings = new Map<number, Map<number, number>>();
+
+  for (const lap of laps) {
+    const driver = num(lap, "driver_number");
+    const lapNumber = num(lap, "lap_number");
+    const start = new Date(str(lap, "date_start") ?? "").getTime();
+    if (driver === null || lapNumber === null || lapNumber < 2 || !Number.isFinite(start)) continue;
+
+    const completed = lapNumber - 1;
+    const byDriver = crossings.get(completed) ?? new Map<number, number>();
+    byDriver.set(driver, start);
+    crossings.set(completed, byDriver);
+  }
+
+  const result: Record<number, Record<number, number>> = {};
+  for (const [lapNumber, byDriver] of crossings) {
+    const leader = Math.min(...byDriver.values());
+    for (const [driver, time] of byDriver) {
+      (result[driver] ??= {})[lapNumber] = Math.round((time - leader) / 10) / 100;
+    }
+  }
+
+  return result;
+}
+
 export async function fetchSessionInsights(request: Request, session: F1Session): Promise<SessionInsights> {
   const cutoffMs = new Date(positionCutoffIso(request, session)).getTime();
   const sessionKey = session.sessionKey;
@@ -252,6 +284,10 @@ export async function fetchSessionInsights(request: Request, session: F1Session)
     championshipDrivers,
     championshipTeams,
     ...computeLaps(completedLaps),
+    // Qui serve l'inizio del giro (non il completamento): basta che sia gia' avvenuto.
+    gapByLap: isRace
+      ? computeGapByLap(laps.filter((lap) => new Date(str(lap, "date_start") ?? "").getTime() <= cutoffMs))
+      : {},
   };
 }
 

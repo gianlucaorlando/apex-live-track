@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Globe2, RefreshCcw, Timer } from "lucide-react";
+import { Activity, Cloud, CloudRain, CloudSun, Globe2, RefreshCcw, Snowflake, Sun, Timer, Zap } from "lucide-react";
 import { formatShortDateTime, formatTime } from "@/lib/format";
 import {
   LANGUAGE_OPTIONS,
@@ -13,6 +13,8 @@ import {
   type Locale,
 } from "@/lib/i18n";
 import type { F1Meeting, F1Session } from "@/types/f1";
+import type { TrackWeather } from "@/types/f1Insights";
+import type { RaceWeather, WeatherCondition } from "@/types/weather";
 
 interface SessionHeaderProps {
   session: F1Session | null;
@@ -27,6 +29,63 @@ interface SessionHeaderProps {
   onRefresh: () => void;
   onToggleDemo: () => void;
   onLocaleChange: (locale: Locale) => void;
+  /** Meteo della localita' (Open-Meteo) e, se disponibile, quello misurato in pista (OpenF1). */
+  weather?: RaceWeather | null;
+  trackWeather?: TrackWeather | null;
+}
+
+function WeatherIcon({ condition }: { condition: WeatherCondition | undefined }) {
+  const className = "h-3.5 w-3.5";
+  switch (condition) {
+    case "clear":
+      return <Sun className={className} aria-hidden="true" />;
+    case "rain":
+      return <CloudRain className={className} aria-hidden="true" />;
+    case "storm":
+      return <Zap className={className} aria-hidden="true" />;
+    case "snow":
+      return <Snowflake className={className} aria-hidden="true" />;
+    case "cloudy":
+    case "fog":
+      return <Cloud className={className} aria-hidden="true" />;
+    default:
+      return <CloudSun className={className} aria-hidden="true" />;
+  }
+}
+
+function WeatherChip({
+  weather,
+  trackWeather,
+  locale,
+}: {
+  weather: RaceWeather | null;
+  trackWeather: TrackWeather | null;
+  locale: Locale;
+}) {
+  if (!weather && !trackWeather) {
+    return null;
+  }
+
+  const air = trackWeather?.airTemperature ?? weather?.temperatureC ?? null;
+  const raining = trackWeather?.rainfall || weather?.condition === "rain" || weather?.condition === "storm";
+
+  return (
+    <span
+      className="inline-flex h-7 items-center gap-2 rounded border border-white/20 px-2.5 text-white"
+      title={weather ? `${weather.description} · ${weather.locationName}` : undefined}
+    >
+      <span className={raining ? "text-sky-300" : "text-white/80"}>
+        <WeatherIcon condition={raining && weather?.condition !== "storm" ? "rain" : weather?.condition} />
+      </span>
+      {air !== null ? <span className="font-semibold">{Math.round(air)}°C</span> : null}
+      {weather?.description ? <span className="hidden text-white/60 lg:inline">{weather.description}</span> : null}
+      {trackWeather?.trackTemperature != null ? (
+        <span className="border-l border-white/20 pl-2 text-white/60">
+          {t(locale, "trackTemp")} <span className="font-semibold text-white">{Math.round(trackWeather.trackTemperature)}°C</span>
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function StatusChip({
@@ -99,6 +158,8 @@ export function SessionHeader({
   onRefresh,
   onToggleDemo,
   onLocaleChange,
+  weather = null,
+  trackWeather = null,
 }: SessionHeaderProps) {
   const eventName =
     meeting?.meetingName || session?.countryName
@@ -131,6 +192,7 @@ export function SessionHeader({
 
       <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
         <StatusChip session={session} demo={demo} locale={locale} />
+        <WeatherChip weather={weather} trackWeather={trackWeather} locale={locale} />
         <span className="hidden items-center gap-1.5 text-white/55 md:inline-flex">
           <Activity className="h-3.5 w-3.5" aria-hidden="true" />
           {t(locale, "updated")} {lastUpdated ? formatTime(lastUpdated, locale) : "\u2014"}

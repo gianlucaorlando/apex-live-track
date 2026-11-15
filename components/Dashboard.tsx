@@ -144,7 +144,11 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   );
   const telemetryDriver =
     liveData.standings.find((row) => row.driverNumber === selectedDriverNumber) ?? null;
-  const gapHistory = useGapHistory(liveData.standings, liveData.session?.sessionKey ?? null);
+  const gapHistory = useGapHistory(
+    liveData.standings,
+    liveData.session?.sessionKey ?? null,
+    insights?.gapByLap ?? null,
+  );
   const lapSummary = useMemo(() => {
     const currentLaps = liveData.standings
       .map((row) => row.currentLap)
@@ -158,9 +162,14 @@ export function Dashboard({ initialDemo }: DashboardProps) {
     };
   }, [liveData.standings]);
 
-  // Link diretti: ?view=calendar | season-standings apre subito quella sezione.
+  // Link diretti: ?view=calendar | season-standings apre una sezione, ?mode=ladder | chart | map una vista del tracciato.
   useEffect(() => {
-    const view = new URLSearchParams(window.location.search).get("view");
+    const query = new URLSearchParams(window.location.search);
+    const view = query.get("view");
+    const mode = query.get("mode");
+    if (mode === "ladder" || mode === "chart" || mode === "map") {
+      setTrackViewMode(mode);
+    }
     if (view === "calendar" || view === "season-standings" || view === "track") {
       setActiveView(view);
     }
@@ -172,7 +181,10 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   }, []);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
+    // Il parametro ?mode= nell'URL ha la precedenza sulla scelta salvata.
+    const stored = new URLSearchParams(window.location.search).has("mode")
+      ? null
+      : window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
 
     if (stored === "neon") {
       setTrackViewMode("map");
@@ -300,6 +312,8 @@ export function Dashboard({ initialDemo }: DashboardProps) {
           onRefresh={liveData.refresh}
           onToggleDemo={() => setDemo((value) => !value)}
           onLocaleChange={setLocale}
+          weather={weather}
+          trackWeather={insights?.weather ?? null}
         />
 
         <ViewTabs
