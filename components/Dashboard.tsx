@@ -1,20 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, CalendarDays, Gamepad2, Map, Trophy } from "lucide-react";
+import { ArrowRightLeft, CalendarDays, LineChart, Map, Trophy, Zap } from "lucide-react";
 import { ErrorState } from "@/components/ErrorState";
+import { GapHistoryChart } from "@/components/GapHistoryChart";
 import { GapLadder } from "@/components/GapLadder";
 import { LiveStandings } from "@/components/LiveStandings";
 import { LoadingState } from "@/components/LoadingState";
-import { MotorsportNews } from "@/components/MotorsportNews";
 import { RaceCalendar } from "@/components/RaceCalendar";
 import { RaceCommentary } from "@/components/RaceCommentary";
+import { SessionDataPanel } from "@/components/SessionDataPanel";
+import { TelemetryHud } from "@/components/TelemetryHud";
 import { SessionHeader } from "@/components/SessionHeader";
 import { SeasonStandings } from "@/components/SeasonStandings";
 import { StatusBanner } from "@/components/StatusBanner";
 import { TrackMap } from "@/components/TrackMap";
 import { WeatherBackdrop } from "@/components/WeatherBackdrop";
 import { useF1LiveData } from "@/hooks/useF1LiveData";
+import { useGapHistory } from "@/hooks/useGapHistory";
+import { useSessionInsights } from "@/hooks/useSessionInsights";
 import { DEFAULT_LOCALE, normalizeLocale, t, type Locale } from "@/lib/i18n";
 import type { CircuitPhoto, CircuitPhotoApiResponse } from "@/types/circuit";
 import type { RaceWeather, WeatherApiResponse } from "@/types/weather";
@@ -28,7 +32,7 @@ type DashboardView = "track" | "calendar" | "season-standings";
 // Visualizzazione della vista "Tracciato": corsia dei distacchi (fluida, basata su
 // intervalli scalari), mappa del circuito (posizioni x/y, ~3,7 Hz) oppure la stessa
 // mappa con la skin "game" in stile racing game 2D dall'alto.
-type TrackViewMode = "ladder" | "map" | "game";
+type TrackViewMode = "ladder" | "chart" | "neon";
 
 const TRACK_VIEW_MODE_STORAGE_KEY = "f1-live-track-view-mode";
 
@@ -41,8 +45,8 @@ interface TrackViewToggleProps {
 function TrackViewToggle({ mode, locale, onChange }: TrackViewToggleProps) {
   const options: { mode: TrackViewMode; label: string; icon: typeof Map }[] = [
     { mode: "ladder", label: t(locale, "viewModeLadder"), icon: ArrowRightLeft },
-    { mode: "map", label: t(locale, "viewModeMap"), icon: Map },
-    { mode: "game", label: t(locale, "viewModeGame"), icon: Gamepad2 },
+    { mode: "chart", label: t(locale, "viewModeChart"), icon: LineChart },
+    { mode: "neon", label: t(locale, "viewModeNeon"), icon: Zap },
   ];
 
   return (
@@ -137,6 +141,15 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   const loadingMessage = demo
     ? t(locale, "loadingDemoReplay")
     : t(locale, "loadingLatestSession");
+  const { insights, telemetry } = useSessionInsights(
+    liveData.session?.sessionKey ?? null,
+    liveData.isLive,
+    liveData.buildRequestParams,
+    selectedDriverNumber,
+  );
+  const telemetryDriver =
+    liveData.standings.find((row) => row.driverNumber === selectedDriverNumber) ?? null;
+  const gapHistory = useGapHistory(liveData.standings, liveData.session?.sessionKey ?? null);
   const lapSummary = useMemo(() => {
     const currentLaps = liveData.standings
       .map((row) => row.currentLap)
@@ -158,7 +171,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
   useEffect(() => {
     const stored = window.localStorage.getItem(TRACK_VIEW_MODE_STORAGE_KEY);
 
-    if (stored === "ladder" || stored === "map" || stored === "game") {
+    if (stored === "ladder" || stored === "chart" || stored === "neon") {
       setTrackViewMode(stored);
     }
 
@@ -346,7 +359,17 @@ export function Dashboard({ initialDemo }: DashboardProps) {
 
           {activeView === "track" ? (
             <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(12rem,0.58fr)] gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(34rem,0.54fr)] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_40rem]">
-              <div className="flex min-h-0 flex-col gap-2">
+              <div className="relative flex min-h-0 flex-col gap-2">
+                {telemetryDriver ? (
+                  <div className="pointer-events-none absolute bottom-3 left-3 z-[80]">
+                    <TelemetryHud
+                      driver={telemetryDriver}
+                      samples={telemetry}
+                      locale={locale}
+                      onClose={() => setSelectedDriverNumber(null)}
+                    />
+                  </div>
+                ) : null}
                 <TrackViewToggle
                   mode={trackViewMode}
                   locale={locale}
@@ -363,13 +386,31 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                       locale={locale}
                       onHoverDriver={setHoveredDriver}
                       onSelectDriver={setSelectedDriverNumber}
+                      gapHistory={gapHistory.history}
+                      gapHistoryVersion={gapHistory.version}
                     />
                   </div>
+                ) : trackViewMode === "chart" ? (
+                  <section className="panel-neon flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl">
+                    <div className="flex flex-none items-center gap-2 border-b border-white/10 px-4 py-3">
+                      <LineChart className="h-4 w-4 text-cyan-300" aria-hidden="true" />
+                      <h2 className="panel-neon-title text-sm font-black uppercase italic tracking-[0.18em]">
+                        {t(locale, "gapChartTitle")}
+                      </h2>
+                    </div>
+                    <div className="min-h-0 flex-1 px-3 pb-2 pt-3">
+                      <GapHistoryChart
+                        history={gapHistory.history}
+                        version={gapHistory.version}
+                        standings={liveData.standings}
+                        hoveredDriver={hoveredDriver}
+                        selectedDriverNumber={selectedDriverNumber}
+                        locale={locale}
+                      />
+                    </div>
+                  </section>
                 ) : (
                   <div className="min-h-0 flex-1">
-                    {/* Mappa e Arcade condividono la stessa istanza di TrackMap
-                        (cambia solo la prop skin), cosi' il passaggio tra le due
-                        non rimonta il componente ne' azzera l'animazione. */}
                     <TrackMap
                       meeting={liveData.meeting}
                       standings={liveData.standings}
@@ -381,7 +422,7 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                       hoveredDriver={hoveredDriver}
                       selectedDriverNumber={selectedDriverNumber}
                       locale={locale}
-                      skin={trackViewMode === "game" ? "game" : "classic"}
+                      skin="neon"
                       onHoverDriver={setHoveredDriver}
                       onSelectDriver={setSelectedDriverNumber}
                     />
@@ -396,15 +437,24 @@ export function Dashboard({ initialDemo }: DashboardProps) {
                   locale={locale}
                   onHoverDriver={setHoveredDriver}
                   onSelectDriver={setSelectedDriverNumber}
+                  insights={insights}
                 />
                 <RaceCommentary
                   messages={liveData.raceControlMessages}
                   drivers={liveData.drivers}
                   locale={locale}
                   onSelectDriver={setSelectedDriverNumber}
+                  teamRadio={insights?.teamRadio}
+                  pitStops={insights?.pitStops}
+                  overtakes={insights?.overtakes}
                 />
                 <div className="min-h-0 xl:col-span-2">
-                  <MotorsportNews locale={locale} />
+                  <SessionDataPanel
+                    insights={insights}
+                    standings={liveData.standings}
+                    locale={locale}
+                    onSelectDriver={setSelectedDriverNumber}
+                  />
                 </div>
               </div>
             </div>

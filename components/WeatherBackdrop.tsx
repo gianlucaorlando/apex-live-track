@@ -195,7 +195,7 @@ export function WeatherBackdrop({ weather, circuitPhoto, locale }: WeatherBackdr
       {circuitPhoto ? (
         <>
           <div
-            className="absolute inset-0 bg-cover bg-center opacity-95 brightness-110 saturate-125 contrast-110"
+            className="absolute inset-[-2rem] bg-cover bg-center opacity-60 blur-[3px] brightness-75 saturate-150"
             data-circuit-photo-backdrop
             style={{ backgroundImage: `url("${circuitPhoto.imageUrl}")` }}
           />
@@ -224,6 +224,14 @@ export function WeatherBackdrop({ weather, circuitPhoto, locale }: WeatherBackdr
         className={`absolute inset-0 ${weatherStyle.accent}`}
         style={{ backgroundImage: weatherStyle.texture }}
       />
+      {/* Aurora neon: bagliori lenti ciano/magenta sopra foto e meteo */}
+      <div className="absolute inset-0 bg-[#05010f]/55" />
+      <div className="animate-aurora absolute -left-[15%] -top-[25%] h-[70vh] w-[60vw] rounded-full bg-fuchsia-600/25 blur-[120px]" />
+      <div
+        className="animate-aurora absolute -bottom-[30%] -right-[10%] h-[75vh] w-[55vw] rounded-full bg-cyan-500/20 blur-[120px]"
+        style={{ animationDelay: "-11s" }}
+      />
+      <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(232,121,249,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(232,121,249,0.9)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_80%)]" />
       <div
         className={
           photoVisible

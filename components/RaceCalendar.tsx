@@ -497,7 +497,7 @@ export function RaceCalendar({ locale }: { locale: Locale }) {
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-neutral-950/74 backdrop-blur-sm"
+      className="flex h-full min-h-0 flex-col panel-neon rounded-xl overflow-hidden"
       data-f1-calendar
     >
       <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-3 md:flex-row md:items-center md:justify-between">

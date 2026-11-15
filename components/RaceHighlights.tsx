@@ -321,7 +321,7 @@ export function RaceHighlights({
 
   return (
     <aside
-      className="flex h-full min-h-0 flex-col rounded-lg border border-white/10 bg-neutral-950/76 backdrop-blur-sm"
+      className="flex h-full min-h-0 flex-col panel-neon rounded-xl overflow-hidden"
       aria-label={t(locale, "highlightsAria")}
       data-race-highlights
     >

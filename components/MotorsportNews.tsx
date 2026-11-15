@@ -11,6 +11,8 @@ import type {
 
 interface MotorsportNewsProps {
   locale: Locale;
+  /** Dentro un altro pannello (tab): niente cornice ne' intestazione propria. */
+  embedded?: boolean;
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -21,7 +23,7 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength - 1).trim()}...`;
 }
 
-export function MotorsportNews({ locale }: MotorsportNewsProps) {
+export function MotorsportNews({ locale, embedded = false }: MotorsportNewsProps) {
   const [items, setItems] = useState<MotorsportNewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,11 +72,11 @@ export function MotorsportNews({ locale }: MotorsportNewsProps) {
 
   return (
     <aside
-      className="flex h-full min-h-0 flex-col rounded-lg border border-white/10 bg-neutral-950/76 backdrop-blur-sm"
+      className={`flex h-full min-h-0 flex-col ${embedded ? "" : "panel-neon rounded-xl overflow-hidden"}`}
       aria-label={t(locale, "motorsportNewsAria")}
       data-motorsport-news
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+      <div className={`flex items-center justify-between border-b border-white/10 px-4 py-3 ${embedded ? "hidden" : ""}`}>
         <div className="flex min-w-0 items-center gap-2">
           <Newspaper className="h-4 w-4 flex-none text-cyan-200" aria-hidden="true" />
           <h2 className="truncate text-sm font-black uppercase tracking-[0.16em] text-white">

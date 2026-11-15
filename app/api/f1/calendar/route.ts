@@ -40,7 +40,7 @@ interface CacheEntry {
 }
 
 const JOLPICA_BASE_URL = "https://api.jolpi.ca/ergast/f1";
-const CALENDAR_CACHE_VERSION = "v4";
+const CALENDAR_CACHE_VERSION = "v5";
 
 const globalCache = globalThis as typeof globalThis & {
   __f1LiveTrackCalendarCacheV3?: Map<string, CacheEntry>;
@@ -95,7 +95,38 @@ function endpoint(path: string): URL {
   return new URL(`${JOLPICA_BASE_URL}/${path}`);
 }
 
+// Jolpica limita le raffiche (~4 req/s): sui 429 si riprova con attesa crescente,
+// rispettando Retry-After quando presente.
+const JOLPICA_MAX_RETRIES = 3;
+const JOLPICA_PAGE_DELAY_MS = 350;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchJson(url: URL, timeoutMs = 9000): Promise<unknown> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fetchJsonOnce(url, timeoutMs);
+    } catch (error) {
+      const retryAfterMs = error instanceof RateLimitError ? error.retryAfterMs : null;
+
+      if (retryAfterMs === null || attempt >= JOLPICA_MAX_RETRIES) {
+        throw error;
+      }
+
+      await sleep(retryAfterMs || 1000 * 2 ** attempt);
+    }
+  }
+}
+
+class RateLimitError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super("Jolpica ha risposto con 429");
+  }
+}
+
+async function fetchJsonOnce(url: URL, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -109,6 +140,11 @@ async function fetchJson(url: URL, timeoutMs = 9000): Promise<unknown> {
       signal: controller.signal,
     });
     const payload: unknown = await response.json().catch(() => null);
+
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      throw new RateLimitError(Number.isFinite(retryAfter) ? Math.min(retryAfter, 10) * 1000 : 0);
+    }
 
     if (!response.ok) {
       throw new Error(`Jolpica ha risposto con ${response.status}`);
@@ -326,6 +362,10 @@ async function fetchAllResultsPayload(season: number): Promise<unknown> {
   let total = Infinity;
 
   for (let offset = 0; offset < total; offset += PAGE_SIZE) {
+    if (offset > 0) {
+      await sleep(JOLPICA_PAGE_DELAY_MS);
+    }
+
     const url = endpoint(`${season}/results/`);
     url.searchParams.set("limit", String(PAGE_SIZE));
     url.searchParams.set("offset", String(offset));
@@ -357,7 +397,38 @@ async function fetchAllResultsPayload(season: number): Promise<unknown> {
   return { MRData: { RaceTable: { Races: allRaces }, season: String(season) } };
 }
 
+// Ultimi podi validi per stagione: i risultati di gare concluse non cambiano, quindi
+// se Jolpica fallisce si riusano invece di mostrare podi vuoti.
+const lastGoodResults = new Map<number, ResultsByRound>();
+
 async function fetchPodiumByRound(
+  season: number,
+  messages: string[],
+): Promise<ResultsByRound> {
+  const fresh = await fetchPodiumByRoundUncached(season, messages);
+  const previous = lastGoodResults.get(season);
+
+  if (previous) {
+    for (const [round, podium] of previous.podiumByRound) {
+      if (!fresh.podiumByRound.has(round)) {
+        fresh.podiumByRound.set(round, podium);
+      }
+    }
+    for (const [round, laps] of previous.lapsByRound) {
+      if (!fresh.lapsByRound.has(round)) {
+        fresh.lapsByRound.set(round, laps);
+      }
+    }
+  }
+
+  if (fresh.podiumByRound.size > 0) {
+    lastGoodResults.set(season, fresh);
+  }
+
+  return fresh;
+}
+
+async function fetchPodiumByRoundUncached(
   season: number,
   messages: string[],
 ): Promise<ResultsByRound> {
@@ -386,12 +457,9 @@ async function fetchPodiumByRound(
       error instanceof Error ? error.message : "Ricerca podio non riuscita";
     console.error(`[calendar] Primary results fetch failed: ${reason}`);
 
-    if (/429/.test(reason)) {
-      return { lapsByRound, podiumByRound };
-    }
-
     try {
       for (const position of [1, 2, 3]) {
+        await sleep(JOLPICA_PAGE_DELAY_MS);
         const url = endpoint(`${season}/results/${position}/`);
         url.searchParams.set("limit", "100");
 
@@ -526,8 +594,13 @@ export async function GET(request: Request) {
   try {
     const payload = await fetchCalendarPayload(seasonPath, locale);
 
+    // Podi mancanti su gare concluse (tipicamente un 429): cache breve per riprovare presto.
+    const missingPodiums = (payload.data?.races ?? []).some(
+      (race) => race.status === "past" && race.podium.length === 0,
+    );
+
     calendarCache.set(cacheKey, {
-      expiresAt: Date.now() + 30 * 60 * 1000,
+      expiresAt: Date.now() + (missingPodiums ? 60 : 30 * 60) * 1000,
       value: payload,
     });
 

@@ -71,6 +71,8 @@ export interface UseF1LiveDataResult {
   lastUpdated: string | null;
   motionTimeMs: number | null;
   refresh: () => void;
+  /** Query (sessione, replay, lingua) da riusare per le route API aggiuntive. */
+  buildRequestParams: () => URLSearchParams;
 }
 
 function replayMillisecondsFor(
@@ -1033,5 +1035,6 @@ export function useF1LiveData(demo: boolean, locale: Locale): UseF1LiveDataResul
     lastUpdated: hasCurrentModeData ? lastUpdated : null,
     motionTimeMs: hasCurrentModeData ? motionTimeMs : null,
     refresh,
+    buildRequestParams: () => buildParams(demo, session, replayStartedAt.current, locale),
   };
 }

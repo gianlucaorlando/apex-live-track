@@ -555,7 +555,7 @@ function replayCutoffIso(request: Request, session: F1Session): string {
   return typeof cutoff === "string" ? cutoff : new Date().toISOString();
 }
 
-function positionCutoffIso(request: Request, session: F1Session): string {
+export function positionCutoffIso(request: Request, session: F1Session): string {
   const url = new URL(request.url);
   const cutoffTime = new Date(replayCutoffIso(request, session)).getTime();
   const requestedLagMs = parseNumberParam(url.searchParams.get("position_lag_ms"), 0);

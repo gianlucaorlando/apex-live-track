@@ -45,7 +45,11 @@ import type { RaceWeather, WeatherCondition } from "@/types/weather";
  * bianco, "game" ricrea la vista dall'alto di un racing game 2D (prato,
  * asfalto grigio, cordoli rosso-bianchi sulle curve, auto orientate).
  */
-export type TrackSkin = "classic" | "game";
+export type TrackSkin = "classic" | "game" | "neon";
+
+// Skin "neon": lunghezza (unita' viewBox) della scia luminosa dietro ogni auto
+const NEON_TRAIL_LENGTH = 70;
+const NEON_TRAIL_SAMPLES = 14;
 
 interface TrackMapProps {
   meeting: F1Meeting | null;
@@ -1462,6 +1466,8 @@ export function TrackMap({
   // corrente per pilota (+1 = distanza crescente lungo il path).
   const rotorNodeRefs = useRef<Map<number, SVGGElement>>(new Map());
   const markerDirectionRef = useRef<Map<number, 1 | -1>>(new Map());
+  // Skin "neon": polyline della scia per pilota, in coordinate relative al marker.
+  const trailNodeRefs = useRef<Map<number, SVGPolylineElement>>(new Map());
   const displayedMarkerRef = useRef<
     Map<number, { x: number; y: number; trackDistance: number | null }>
   >(new Map());
@@ -1979,7 +1985,7 @@ export function TrackMap({
 
           // Skin "game": orienta lo sprite dell'auto lungo la tangente del
           // tracciato, nel verso di marcia dedotto dall'avanzamento recente.
-          if (rafSkinRef.current === "game") {
+          if (rafSkinRef.current !== "classic") {
             const previous = displayedMarkerRef.current.get(driverNumber);
             const total = path.totalLength;
             let direction = markerDirectionRef.current.get(driverNumber) ?? 1;
@@ -2001,6 +2007,24 @@ export function TrackMap({
             if (rotor && ahead && behind && (ahead.x !== behind.x || ahead.y !== behind.y)) {
               const angle = (Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180) / Math.PI;
               rotor.setAttribute("transform", `rotate(${angle.toFixed(1)})`);
+            }
+
+            // Skin "neon": scia che segue il tracciato dietro l'auto
+            const trail = trailNodeRefs.current.get(driverNumber);
+            if (rafSkinRef.current === "neon" && trail) {
+              const trailPoints: string[] = [];
+              for (let step = 0; step <= NEON_TRAIL_SAMPLES; step += 1) {
+                const sample = pointAtTrackDistance(
+                  path,
+                  resolved.distance - (NEON_TRAIL_LENGTH * step * direction) / NEON_TRAIL_SAMPLES,
+                );
+                if (sample) {
+                  trailPoints.push(
+                    `${(sample.x - displayPoint.x).toFixed(1)},${(sample.y - displayPoint.y).toFixed(1)}`,
+                  );
+                }
+              }
+              trail.setAttribute("points", trailPoints.join(" "));
             }
           }
 
@@ -2118,6 +2142,29 @@ export function TrackMap({
           <filter id="marker-glow" x="-100%" y="-100%" width="300%" height="300%">
             <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#f8fafc" floodOpacity="0.35" />
           </filter>
+          {skin === "neon" ? (
+            <>
+              <filter id="neon-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="6" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <linearGradient id="neon-track" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#22d3ee" />
+                <stop offset="55%" stopColor="#a855f7" />
+                <stop offset="100%" stopColor="#f472b6" />
+              </linearGradient>
+              <radialGradient id="neon-sky" cx="50%" cy="45%" r="75%">
+                <stop offset="0%" stopColor="#1e1b4b" />
+                <stop offset="100%" stopColor="#05010f" />
+              </radialGradient>
+              <pattern id="neon-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#c026d3" strokeWidth="0.8" opacity="0.28" />
+              </pattern>
+            </>
+          ) : null}
           {skin === "game" ? (
             <pattern
               id="game-grass"
@@ -2147,6 +2194,23 @@ export function TrackMap({
             height={SVG_HEIGHT * 5}
             fill="url(#game-grass)"
           />
+        ) : skin === "neon" ? (
+          <>
+            <rect
+              x={-SVG_WIDTH * 2}
+              y={-SVG_HEIGHT * 2}
+              width={SVG_WIDTH * 5}
+              height={SVG_HEIGHT * 5}
+              fill="url(#neon-sky)"
+            />
+            <rect
+              x={-SVG_WIDTH * 2}
+              y={-SVG_HEIGHT * 2}
+              width={SVG_WIDTH * 5}
+              height={SVG_HEIGHT * 5}
+              fill="url(#neon-grid)"
+            />
+          </>
         ) : (
           <>
             <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="rgba(0,0,0,0.18)" />
@@ -2250,6 +2314,41 @@ export function TrackMap({
               strokeWidth="3.5"
               opacity="0.8"
             />
+          </g>
+        ) : hasTrack && skin === "neon" ? (
+          <g pointerEvents="none">
+            {/* Alone diffuso, tubo luminoso e flusso di luce animato */}
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="url(#neon-track)"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="30"
+              opacity="0.22"
+              filter="url(#neon-glow)"
+            />
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="url(#neon-track)"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="9"
+              filter="url(#neon-glow)"
+            />
+            <polyline
+              points={polylinePoints}
+              fill="none"
+              stroke="#f0f9ff"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              strokeDasharray="14 46"
+              opacity="0.9"
+            >
+              <animate attributeName="stroke-dashoffset" from="0" to="-60" dur="1.2s" repeatCount="indefinite" />
+            </polyline>
           </g>
         ) : hasTrack ? (
           <g>
@@ -2386,7 +2485,79 @@ export function TrackMap({
               filter={active ? "url(#marker-glow)" : undefined}
             >
               <title>{markerTitle(driver, locale)}</title>
-              {skin === "game" ? (
+              {skin === "neon" ? (
+                <>
+                  <circle r="26" fill="transparent" />
+                  <polyline
+                    ref={(node) => {
+                      if (node) {
+                        trailNodeRefs.current.set(driver.driverNumber, node);
+                      } else {
+                        trailNodeRefs.current.delete(driver.driverNumber);
+                      }
+                    }}
+                    fill="none"
+                    stroke={driver.teamColour}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={active ? 7 : 5}
+                    opacity="0.75"
+                    filter="url(#neon-glow)"
+                  />
+                  {/* Nodo ruotato dal loop rAF (non usato visivamente, mantiene la direzione) */}
+                  <g
+                    ref={(node) => {
+                      if (node) {
+                        rotorNodeRefs.current.set(driver.driverNumber, node);
+                      } else {
+                        rotorNodeRefs.current.delete(driver.driverNumber);
+                      }
+                    }}
+                  />
+                  <circle
+                    r={active ? 13 : 10}
+                    fill={driver.teamColour}
+                    opacity="0.55"
+                    filter="url(#neon-glow)"
+                  />
+                  <circle r={active ? 7 : 5.5} fill="#ffffff" stroke={driver.teamColour} strokeWidth="2.5" />
+                  <text
+                    x="0"
+                    y={active ? -20 : -16}
+                    textAnchor="middle"
+                    className="select-none text-[13px] font-black tracking-wider"
+                    fill="#ffffff"
+                    stroke={driver.teamColour}
+                    strokeWidth="0.8"
+                    style={{ filter: `drop-shadow(0 0 4px ${driver.teamColour})` }}
+                  >
+                    {driver.acronym}
+                  </text>
+                  {positionLabel ? (
+                    <g transform={`translate(${active ? 16 : 14} ${active ? 15 : 13})`}>
+                      <rect
+                        x={-positionBadgeWidth / 2}
+                        y="-8"
+                        width={positionBadgeWidth}
+                        height="16"
+                        rx="8"
+                        fill="#0b0420"
+                        stroke="#e879f9"
+                        strokeWidth="1.4"
+                      />
+                      <text
+                        x="0"
+                        y="3.5"
+                        textAnchor="middle"
+                        className="select-none text-[10px] font-black"
+                        fill="#f5d0fe"
+                      >
+                        {positionLabel}
+                      </text>
+                    </g>
+                  ) : null}
+                </>
+              ) : skin === "game" ? (
                 <>
                   {/* Area di click generosa: lo sprite e' sottile e il pannello
                       riduce parecchio la scala del viewBox */}
